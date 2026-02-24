@@ -1,0 +1,28 @@
+# Environment / secrets (do not commit)
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Compiled files
+main.js
+*.map
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# macOS files
+.DS_Store
+
+# Obsidian data files
+data.json
+
+# Test vault
+test-vault/
+
+# Build output
+dist/

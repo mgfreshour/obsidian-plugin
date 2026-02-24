@@ -1,0 +1,86 @@
+# Obsidian Plugin Development Rules
+
+## TypeScript Best Practices
+
+- Use TypeScript strict mode features
+- Prefer explicit types over `any`
+- Use interfaces for object shapes
+- Use enums for fixed sets of constants
+- Leverage type inference where appropriate
+- Use `readonly` for immutable properties
+- Prefer `const` assertions for literal types
+
+## Obsidian API Usage
+
+- Always extend the `Plugin` class from `obsidian`
+- Use `this.app` to access Obsidian's app instance
+- Use `this.addCommand()` for commands
+- Use `this.addSettingTab()` for settings UI
+- Use `this.addRibbonIcon()` for ribbon icons
+- Use `this.registerView()` for custom views
+- Clean up resources in `onunload()`
+- Use `this.app.vault` for file operations
+- Use `this.app.metadataCache` for metadata operations
+- Use `this.app.workspace` for UI operations
+
+## Code Style
+
+- Use 2 spaces for indentation
+- Use single quotes for strings (unless double quotes are needed)
+- Use semicolons
+- Use trailing commas in multi-line objects/arrays
+- Use meaningful variable and function names
+- Keep functions focused and small
+- Add JSDoc comments for public APIs
+
+## File Organization
+
+- Keep main plugin logic in `main.ts`
+- Organize related functionality into modules in `src/`
+- Use `__tests__/` directories for test files
+- Name test files with `.spec.ts` or `.test.ts` extensions
+- Keep styles in `styles.css` or separate CSS files
+
+## Testing Requirements
+
+- Write unit tests for utility functions
+- Mock Obsidian API objects in tests
+- Test error handling paths
+- Aim for meaningful test coverage
+- Use descriptive test names
+
+## Error Handling
+
+- Use try-catch blocks for async operations
+- Provide meaningful error messages
+- Log errors appropriately
+- Handle edge cases gracefully
+
+## Performance
+
+- Avoid unnecessary re-renders
+- Use debouncing for frequent operations
+- Cache expensive computations
+- Clean up event listeners and timers
+
+## Documentation
+
+- Document public APIs with JSDoc
+- Keep README.md up to date
+- Document complex algorithms
+- Include usage examples in comments
+
+## Obsidian Plugin Development Guidelines
+
+- Follow Obsidian's plugin development best practices
+- Test plugins in both desktop and mobile (if applicable)
+- Handle vault state changes gracefully
+- Respect user settings and preferences
+- Use Obsidian's built-in UI components when possible
+- Follow Obsidian's design patterns and conventions
+
+## References
+
+- [Obsidian Plugin API Documentation](https://docs.obsidian.md/Plugins)
+- [Obsidian Plugin Development Guide](https://docs.obsidian.md/Plugins/Getting+started)
+- [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html)
