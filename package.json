@@ -9,7 +9,8 @@
     "test": "jest",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "generate-vault": "node scripts/generate-test-vault.mjs"
+    "generate-vault": "node scripts/generate-test-vault.mjs",
+    "launch": "npm run build && npm run generate-vault && node scripts/launch-obsidian.mjs"
   },
   "keywords": [
     "obsidian",
