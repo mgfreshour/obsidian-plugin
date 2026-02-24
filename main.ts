@@ -1,7 +1,8 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, SettingsTab } from './src/settings';
 import type { PluginSettings } from './src/settings';
-import { fetchInboxTasks } from './src/omnifocus';
+import { fetchTasks, parseSource, sourceLabel } from './src/omnifocus';
+import type { TaskSource } from './src/omnifocus';
 
 const INBOX_FILE = 'Sample Note.md';
 
@@ -33,8 +34,31 @@ export default class ObsidianPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor('omnifocus', (source, el) => {
       const container = el.createDiv({ cls: 'omnifocus-container' });
 
+      let taskSource: TaskSource | null;
+      try {
+        taskSource = parseSource(source);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        container.createEl('p', {
+          text: message,
+          cls: 'omnifocus-error',
+        });
+        return;
+      }
+
+      if (taskSource === null) {
+        const usage = container.createDiv({ cls: 'omnifocus-usage' });
+        usage.createEl('p', { text: 'OmniFocus — specify a source:' });
+        const list = usage.createEl('ul');
+        list.createEl('li', { text: 'inbox' });
+        list.createEl('li', { text: 'project: <name>' });
+        return;
+      }
+
+      const label = sourceLabel(taskSource);
+
       const btn = container.createEl('button', {
-        text: 'Sync OmniFocus',
+        text: `Sync OmniFocus ${label}`,
         cls: 'omnifocus-sync-btn',
       });
 
@@ -44,7 +68,7 @@ export default class ObsidianPlugin extends Plugin {
         listEl.empty();
         if (tasks.length === 0) {
           const empty = container.createEl('p', {
-            text: 'No tasks in inbox.',
+            text: `No tasks in ${label}.`,
             cls: 'omnifocus-empty',
           });
           listEl.replaceWith(empty);
@@ -59,7 +83,7 @@ export default class ObsidianPlugin extends Plugin {
         btn.disabled = true;
         btn.setText('Syncing...');
         try {
-          const tasks = await fetchInboxTasks();
+          const tasks = await fetchTasks(taskSource);
           renderTasks(tasks);
         } catch (err) {
           listEl.empty();
@@ -67,7 +91,7 @@ export default class ObsidianPlugin extends Plugin {
           listEl.createEl('li', { text: `Error: ${message}` });
         } finally {
           btn.disabled = false;
-          btn.setText('Sync OmniFocus');
+          btn.setText(`Sync OmniFocus ${label}`);
         }
       };
 
@@ -85,7 +109,7 @@ export default class ObsidianPlugin extends Plugin {
   /** Fetch OmniFocus inbox and write to the inbox file. */
   async syncInbox() {
     try {
-      const tasks = await fetchInboxTasks();
+      const tasks = await fetchTasks({ kind: 'inbox' });
 
       const lines = ['# OmniFocus Inbox', ''];
       if (tasks.length === 0) {

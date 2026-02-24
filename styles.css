@@ -35,9 +35,14 @@
 
 .omnifocus-task-list li {
   margin: 4px 0;
+  white-space: pre-line;
 }
 
 .omnifocus-empty {
   color: var(--text-muted);
   font-style: italic;
+}
+
+.omnifocus-error {
+  white-space: pre-line;
 }

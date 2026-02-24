@@ -117,16 +117,43 @@ This is a test vault for developing and testing the ${pluginName} plugin.
 `
 		},
 		{
-			name: "Sample Note.md",
-			content: `# Sample Note
+			name: "OmniFocus Tests.md",
+			content: `# OmniFocus Test Cases
 
-This is a sample note for testing purposes.
+## Inbox
 
-## Features to Test
+\`\`\`omnifocus
+inbox
+\`\`\`
 
-- [[Welcome|Link to Welcome]]
-- \`\`\`code blocks\`\`\`
-- **Bold** and *italic* text
+## Exact project name (has tasks)
+
+\`\`\`omnifocus
+project: ✍️ Team Organization Paper
+\`\`\`
+
+## Substring match (unique)
+
+\`\`\`omnifocus
+project: PlusCal
+\`\`\`
+
+## Substring match (ambiguous — multiple matches)
+
+\`\`\`omnifocus
+project: Team
+\`\`\`
+
+## No match
+
+\`\`\`omnifocus
+project: xyznonexistent
+\`\`\`
+
+## Empty source (usage hint)
+
+\`\`\`omnifocus
+\`\`\`
 `
 		}
 	];
