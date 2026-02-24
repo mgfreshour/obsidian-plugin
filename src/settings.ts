@@ -15,10 +15,12 @@ import type ObsidianPlugin from '../main';
 
 export interface PluginSettings {
   textValue: string;
+  syncIntervalMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   textValue: '',
+  syncIntervalMinutes: 5,
 };
 
 export class SettingsTab extends PluginSettingTab {
@@ -33,7 +35,21 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Hello World' });
+    containerEl.createEl('h2', { text: 'OmniFocus Sync' });
+
+    new Setting(containerEl)
+      .setName('Sync interval (minutes)')
+      .setDesc('How often to auto-sync the OmniFocus inbox. Set to 0 to disable.')
+      .addText((text) =>
+        text
+          .setPlaceholder('5')
+          .setValue(String(this.plugin.settings.syncIntervalMinutes))
+          .onChange(async (value) => {
+            const parsed = parseInt(value, 10);
+            this.plugin.settings.syncIntervalMinutes = isNaN(parsed) ? 0 : Math.max(0, parsed);
+            await this.plugin.saveSettings();
+          }),
+      );
 
     new Setting(containerEl)
       .setName('Text value')
