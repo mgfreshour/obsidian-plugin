@@ -725,6 +725,72 @@ export async function createWorkItem(
   };
 }
 
+/** Payload for creating an epic. */
+export interface CreateEpicPayload {
+  Name: string;
+  Description__c?: string;
+}
+
+/** Result of creating an epic. */
+export interface CreateEpicResult {
+  id: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * Create an epic (ADM_Epic__c) in GUS.
+ * Epics do not have Product_Tag__c; product tags apply only to work items.
+ */
+export async function createEpic(
+  accessToken: string,
+  instanceUrl: string,
+  payload: CreateEpicPayload,
+  requestFn?: RequestFn,
+): Promise<CreateEpicResult> {
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const url = `${base}/services/data/${API_VERSION}/sobjects/ADM_Epic__c`;
+  const body: Record<string, string> = {
+    Name: payload.Name,
+  };
+  if (payload.Description__c) {
+    body.Description__c = payload.Description__c;
+  }
+
+  const res = await req(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    id?: string;
+    success?: boolean;
+    errors?: unknown[];
+  };
+
+  if (!res.ok || !data.success) {
+    const msg =
+      (Array.isArray(data.errors) ? data.errors[0] : data.errors) as { message?: string } | undefined;
+    throw new Error(
+      msg?.message ?? `Create epic failed: HTTP ${res.status}`,
+    );
+  }
+
+  const epicId = data.id as string;
+  if (!epicId) throw new Error('Create epic returned no id');
+
+  return {
+    id: epicId,
+    name: payload.Name,
+    url: `${base}/${epicId}`,
+  };
+}
+
 /**
  * Substitute placeholders in a query template.
  * Placeholders: ${me}, ${team}, ${product_tag}

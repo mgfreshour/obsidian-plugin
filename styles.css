@@ -236,6 +236,27 @@
   cursor: not-allowed;
 }
 
+.gus-create-plan-btn {
+  cursor: pointer;
+  padding: 8px 18px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.gus-create-plan-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.gus-create-plan-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Create User Story modal – larger size and description area */
 .gus-create-user-story-modal.modal {
   min-width: 560px;
@@ -290,6 +311,68 @@
   color: var(--text-muted);
   font-size: 13px;
   margin-top: 8px;
+}
+
+/* Create Plan modal */
+.gus-create-plan-modal.modal {
+  min-width: 560px;
+  width: 85vw;
+  max-width: 900px;
+  min-height: 70vh;
+  max-height: 90vh;
+}
+
+.gus-create-plan-modal .modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.gus-create-plan-modal .setting-item {
+  display: flex;
+}
+
+.gus-create-plan-modal .setting-item-control {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.gus-create-plan-modal .setting-item-control input,
+.gus-create-plan-modal .setting-item-control textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.gus-create-plan-modal .gus-plan-design-doc {
+  min-height: 200px;
+  resize: vertical;
+}
+
+.gus-create-plan-modal .gus-plan-preview {
+  margin: 16px 0;
+  padding: 12px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.gus-create-plan-modal .gus-plan-epic {
+  margin-bottom: 12px;
+}
+
+.gus-create-plan-modal .gus-plan-epic:last-child {
+  margin-bottom: 0;
+}
+
+.gus-create-plan-modal .gus-plan-epic ul {
+  margin: 6px 0 0 16px;
+  padding: 0;
+}
+
+.gus-create-plan-modal .gus-plan-points {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .gus-container {

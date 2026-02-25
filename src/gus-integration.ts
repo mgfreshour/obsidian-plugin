@@ -15,6 +15,7 @@ import {
 } from './gus';
 import type { CachedToken, RequestFn, TokenStorage } from './gus';
 import { CreateUserStoryModal } from './create-user-story-modal';
+import { CreatePlanModal } from './create-plan-modal';
 import { isLLMConfigured, type LLMPluginContext } from './llm';
 import type { LLMConfig } from './llm';
 
@@ -158,6 +159,38 @@ async function insertWorkItemIntoBlock(
 }
 
 /**
+ * Replace the gus block body with epic: <epicName> so the block displays that epic's work items.
+ */
+async function updateBlockWithEpic(
+  app: App,
+  blockSource: string,
+  epicName: string,
+): Promise<boolean> {
+  const file = app.workspace.getActiveFile();
+  if (!file) return false;
+  try {
+    const content = await app.vault.read(file);
+    const escapedBody =
+      blockSource === ''
+        ? '\\n?'
+        : blockSource
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\n/g, '\\n') + '\\n';
+    const pattern = new RegExp('```gus\\n' + escapedBody + '```', 'm');
+    if (!pattern.test(content)) return false;
+    const newBlockBody = `epic: ${epicName}`;
+    const newContent = content.replace(
+      new RegExp('```gus\\n' + escapedBody + '```', 'm'),
+      `\`\`\`gus\n${newBlockBody}\n\`\`\``,
+    );
+    await app.vault.modify(file, newContent);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Register GUS integration: code block processor for work items.
  */
 export function registerGusIntegration(plugin: GusPluginContext): void {
@@ -211,6 +244,37 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
           json: res.json,
         };
       },
+    };
+
+    const onCreatePlanClick = () => {
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
+      }
+      if (!plugin.app.workspace.getActiveFile()) {
+        new Notice('No active note. Open a note with your design document.');
+        return;
+      }
+      const modal = new CreatePlanModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
+        onSuccess: async (firstEpicName) => {
+          const updated = await updateBlockWithEpic(
+            plugin.app,
+            source,
+            firstEpicName,
+          );
+          if (updated) {
+            new Notice(`Updated block with epic: ${firstEpicName}`);
+          } else {
+            new Notice('Could not update block.');
+          }
+        },
+      });
+      modal.open();
     };
 
     const onCreateUserStoryClick = () => {
@@ -271,6 +335,12 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       text: 'Create User Story',
     });
     createBtn.addEventListener('click', onCreateUserStoryClick);
+
+    const createPlanBtn = btnRow.createEl('button', {
+      cls: 'gus-create-plan-btn',
+      text: 'Create Plan',
+    });
+    createPlanBtn.addEventListener('click', onCreatePlanClick);
 
     const onDescriptionToggle = (e: Event) => {
       e.stopPropagation();
