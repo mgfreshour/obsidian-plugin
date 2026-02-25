@@ -78,7 +78,22 @@ export default class ObsidianPlugin extends Plugin {
         } else {
           for (const task of tasks) {
             const li = listEl.createEl('li', { cls: 'omnifocus-task-item' });
-            li.createSpan({ text: task.name });
+            li.createSpan({ text: task.name, cls: 'omnifocus-task-name' });
+            if (task.note) {
+              const toggle = li.createSpan({
+                cls: 'omnifocus-task-note-toggle',
+                text: '[+]',
+              });
+              const noteEl = li.createDiv({ cls: 'omnifocus-task-note' });
+              noteEl.setText(task.note);
+              noteEl.style.display = 'none';
+              toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = noteEl.style.display === 'none';
+                noteEl.style.display = isOpen ? 'block' : 'none';
+                toggle.setText(isOpen ? '[-]' : '[+]');
+              });
+            }
             const link = li.createEl('a', {
               href: `omnifocus:///task/${task.id}`,
               cls: 'omnifocus-task-link',
@@ -89,17 +104,6 @@ export default class ObsidianPlugin extends Plugin {
               e.preventDefault();
               require('electron').shell.openExternal(`omnifocus:///task/${task.id}`);
             });
-            if (task.note) {
-              const details = li.createEl('details', {
-                cls: 'omnifocus-task-note-details',
-              });
-              details.createEl('summary', {
-                cls: 'omnifocus-task-note-summary',
-                text: 'Note',
-              });
-              const noteEl = details.createDiv({ cls: 'omnifocus-task-note' });
-              noteEl.setText(task.note);
-            }
           }
         }
       };

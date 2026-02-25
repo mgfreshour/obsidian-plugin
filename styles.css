@@ -1,21 +1,24 @@
 /* Plugin styles */
 
 .omnifocus-container {
-  padding: 12px;
+  padding: 16px 20px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  margin: 8px 0;
+  border-radius: 10px;
+  margin: 12px 0;
+  background: var(--background-secondary);
 }
 
 .omnifocus-sync-btn {
   cursor: pointer;
-  padding: 6px 16px;
-  border-radius: 4px;
+  padding: 8px 18px;
+  border-radius: 6px;
   border: none;
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
-  font-size: 14px;
-  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+  transition: opacity 0.15s ease;
 }
 
 .omnifocus-sync-btn:hover {
@@ -28,74 +31,110 @@
 }
 
 .omnifocus-task-list {
-  list-style: disc;
-  padding-left: 24px;
+  list-style: none;
+  padding-left: 0;
   margin: 0;
 }
 
-.omnifocus-task-list li {
-  margin: 4px 0;
+.omnifocus-task-list > li {
+  padding: 10px 0;
   white-space: pre-line;
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background-color 0.12s ease;
+}
+
+.omnifocus-task-list > li:last-child {
+  border-bottom: none;
+}
+
+.omnifocus-task-list > li:hover {
+  background: var(--background-modifier-hover);
+  margin-left: -12px;
+  margin-right: -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 6px;
 }
 
 .omnifocus-task-item {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
+}
+
+.omnifocus-task-item .omnifocus-task-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .omnifocus-task-link {
-  font-size: 0.9em;
-  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: var(--text-muted);
   text-decoration: none;
   flex-shrink: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .omnifocus-task-link:hover {
-  opacity: 1;
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
 }
 
-.omnifocus-task-note-details {
-  width: 100%;
-  margin-top: 4px;
-}
-
-.omnifocus-task-note-summary {
+.omnifocus-task-note-toggle {
   cursor: pointer;
-  font-size: 0.85em;
+  font-size: 12px;
   color: var(--text-muted);
   user-select: none;
-  list-style: none;
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
 }
 
-.omnifocus-task-note-summary::-webkit-details-marker {
-  display: none;
-}
-
-.omnifocus-task-note-summary::before {
-  content: '▸ ';
-  margin-right: 4px;
-}
-
-.omnifocus-task-note-details[open] .omnifocus-task-note-summary::before {
-  content: '▾ ';
+.omnifocus-task-note-toggle:hover {
+  color: var(--text-normal);
 }
 
 .omnifocus-task-note {
-  font-size: 0.85em;
+  display: none;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-muted);
   white-space: pre-line;
-  margin-top: 4px;
-  padding-left: 4px;
-  border-left: 2px solid var(--background-modifier-border);
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--background-primary);
+  border-left: 3px solid var(--interactive-accent);
+  width: 100%;
+}
+
+.omnifocus-task-note.is-open {
+  display: block;
 }
 
 .omnifocus-empty {
   color: var(--text-muted);
   font-style: italic;
+  font-size: 14px;
+  padding: 20px 0;
 }
 
 .omnifocus-error {
   white-space: pre-line;
+  font-size: 13px;
+  color: var(--text-error);
+}
+
+.omnifocus-usage {
+  color: var(--text-muted);
+  font-size: 13px;
 }

@@ -61,6 +61,14 @@ try {
 		console.warn(`main.js not found at ${mainJsSrc}. Run 'npm run build' first.`);
 	}
 
+	// Copy styles.css (if it exists)
+	const stylesSrc = path.join(rootDir, "styles.css");
+	const stylesDest = path.join(pluginDir, "styles.css");
+	if (fs.existsSync(stylesSrc)) {
+		fs.copyFileSync(stylesSrc, stylesDest);
+		console.log(`Copied styles.css to ${stylesDest}`);
+	}
+
 	// Create .obsidian/app.json
 	const appJsonPath = path.join(obsidianDir, "app.json");
 	const appJson = {

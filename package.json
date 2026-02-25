@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
+    "dev:watch": "nodemon --watch src --watch main.ts --watch styles.css --watch manifest.json --watch esbuild.config.mjs --watch scripts --ext ts,css,json,mjs --ignore test-vault --ignore node_modules --exec \"npm run build && npm run generate-vault\"",
     "build": "tsc --noEmit && node esbuild.config.mjs --production",
     "test": "jest",
     "lint": "eslint . --ext .ts",
@@ -19,6 +20,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "nodemon": "^3.1.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.5",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
