@@ -260,24 +260,120 @@
   cursor: not-allowed;
 }
 
+.gus-work-item {
+  position: relative;
+  padding: 16px 20px;
+  padding-right: 100px;
+  margin-bottom: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.gus-work-item:last-child {
+  margin-bottom: 0;
+}
+
+.gus-status {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+}
+
 .gus-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
+  display: block;
   margin-bottom: 10px;
 }
 
+.gus-header .gus-title {
+  margin-bottom: 6px;
+}
+
+.gus-header .gus-description-toggle,
+.gus-header .gus-external-link {
+  margin-right: 8px;
+}
+
+.gus-description-toggle {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.gus-description-toggle:hover {
+  color: var(--text-normal);
+}
+
+.gus-external-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.gus-external-link:hover {
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
 .gus-title {
+  display: block;
   font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
+  width: 100%;
 }
 
 .gus-status {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* Status color groups */
+.gus-status--closed {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.gus-status--active {
+  background: rgba(100, 149, 237, 0.25);
+  color: hsl(220, 70%, 50%);
+}
+
+.gus-status--waiting {
+  background: rgba(255, 193, 7, 0.25);
+  color: hsl(38, 92%, 40%);
+}
+
+.gus-status--review {
+  background: rgba(100, 181, 246, 0.25);
+  color: hsl(199, 89%, 42%);
+}
+
+.gus-status--completed {
+  background: rgba(76, 175, 80, 0.25);
+  color: hsl(122, 39%, 40%);
+}
+
+.gus-status--rejected {
+  background: rgba(244, 67, 54, 0.2);
+  color: hsl(4, 69%, 50%);
+}
+
+.gus-status--default {
   background: var(--background-modifier-border);
   color: var(--text-muted);
 }
