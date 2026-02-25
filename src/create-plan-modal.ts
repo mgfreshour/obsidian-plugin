@@ -12,7 +12,7 @@ import {
   createEpic,
   createWorkItem,
   getAuthenticatedClient,
-  getUserStoryRecordTypeId,
+  getRecordTypeIds,
   searchProductTags,
 } from './gus';
 import type {
@@ -427,11 +427,12 @@ export class CreatePlanModal extends Modal {
 
     try {
       const { accessToken, instanceUrl } = await this.getGusAuth();
-      const recordTypeId = await getUserStoryRecordTypeId(
+      const recordTypeMap = await getRecordTypeIds(
         accessToken,
         instanceUrl,
         this.opts.requestFn,
       );
+      const recordTypeId = recordTypeMap['User_Story'];
       if (!recordTypeId) {
         throw new Error('Could not get User Story record type');
       }

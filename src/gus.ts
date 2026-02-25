@@ -59,12 +59,24 @@ export interface GusWorkItem {
   name: string;
   subject: string;
   status: string;
+  recordTypeDeveloperName?: string;
   description?: string;
   currencyIsoCode?: string;
   severity?: string;
   assigneeId?: string;
   createdDate?: string;
   lastModifiedDate?: string;
+  productTagName?: string;
+  epicName?: string;
+}
+
+/** Comment on a work item (ADM_Comment__c). */
+export interface GusComment {
+  id: string;
+  body: string;
+  createdBy?: string;
+  createdDate?: string;
+  subject?: string;
 }
 
 /** Values for query template substitution. */
@@ -328,12 +340,15 @@ interface SoqlRecord {
   Name?: string;
   Subject__c?: string;
   Status__c?: string;
+  RecordType?: { DeveloperName?: string };
   Details__c?: string;
   CurrencyIsoCode?: string;
   Severity__c?: string;
   Assignee__c?: string;
   CreatedDate?: string;
   LastModifiedDate?: string;
+  Product_Tag__r?: { Name?: string };
+  Epic__r?: { Name?: string };
 }
 
 /** Raw SOQL query response. */
@@ -353,12 +368,15 @@ function parseWorkItem(rec: SoqlRecord): GusWorkItem {
     name: rec.Name ?? '',
     subject: rec.Subject__c ?? '',
     status: rec.Status__c ?? '',
+    recordTypeDeveloperName: rec.RecordType?.DeveloperName,
     description: rec.Details__c,
     currencyIsoCode: rec.CurrencyIsoCode,
     severity: rec.Severity__c,
     assigneeId: rec.Assignee__c,
     createdDate: rec.CreatedDate,
     lastModifiedDate: rec.LastModifiedDate,
+    productTagName: rec.Product_Tag__r?.Name,
+    epicName: rec.Epic__r?.Name,
   };
 }
 
@@ -401,6 +419,74 @@ export async function queryWorkItems(
     }
   }
   return allRecords;
+}
+
+/**
+ * Fetch a single work item by Name (e.g. W-12345).
+ * Returns null if not found.
+ */
+export async function fetchWorkItemByName(
+  accessToken: string,
+  instanceUrl: string,
+  name: string,
+  requestFn?: RequestFn,
+): Promise<GusWorkItem | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const escaped = escapeSoqlString(trimmed);
+  const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c, RecordType.DeveloperName, Type__c, Severity__c, Story_Points__c, Product_Tag__r.Name, Epic__r.Name FROM ADM_Work__c WHERE Name = '${escaped}' LIMIT 1`;
+  const items = await queryWorkItems(
+    accessToken,
+    instanceUrl,
+    soql,
+    requestFn,
+  );
+  return items[0] ?? null;
+}
+
+/** Raw SOQL record for ADM_Comment__c. */
+interface AdmCommentRecord {
+  Id: string;
+  Body__c?: string;
+  Comment_Created_By__c?: string;
+  Comment_Created_Date__c?: string;
+  Subject__c?: string;
+}
+
+/**
+ * Fetch all comments for a work item.
+ */
+export async function fetchCommentsForWorkItem(
+  accessToken: string,
+  instanceUrl: string,
+  workItemId: string,
+  requestFn?: RequestFn,
+): Promise<GusComment[]> {
+  const escaped = escapeSoqlString(workItemId);
+  const soql = `SELECT Id, Body__c, Comment_Created_By__c, Comment_Created_Date__c, Subject__c FROM ADM_Comment__c WHERE Work__c = '${escaped}' ORDER BY Comment_Created_Date__c ASC`;
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const url = `${base}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`;
+  const res = await req(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg =
+      (data as { 0?: { message?: string }; message?: string })[0]?.message ??
+      (data as { message?: string }).message ??
+      `HTTP ${res.status}`;
+    throw new Error(`SOQL query failed: ${msg}`);
+  }
+  const body = data as { records?: AdmCommentRecord[] };
+  const records = body.records ?? [];
+  return records.map((rec) => ({
+    id: rec.Id,
+    body: rec.Body__c ?? '',
+    createdBy: rec.Comment_Created_By__c,
+    createdDate: rec.Comment_Created_Date__c,
+    subject: rec.Subject__c,
+  }));
 }
 
 /**
@@ -468,6 +554,24 @@ export function convertTextToHtml(text: string): string {
     }
   }
   return result.join('');
+}
+
+/**
+ * Convert HTML (e.g. from Details__c) to plain text for LLM prompts.
+ */
+export function htmlToText(html: string): string {
+  if (!html?.trim()) return '';
+  let text = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+  text = text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Product tag search result. */
@@ -618,24 +722,31 @@ export async function searchEpics(
 }
 
 /**
- * Get RecordTypeId for User Story work items.
+ * Get RecordTypeId map for ADM_Work__c: DeveloperName -> Id.
+ * Query once and use map["User_Story"], map["Bug"], etc.
  */
-export async function getUserStoryRecordTypeId(
+export async function getRecordTypeIds(
   accessToken: string,
   instanceUrl: string,
   requestFn?: RequestFn,
-): Promise<string | null> {
+): Promise<Record<string, string>> {
   const base = instanceUrl.replace(/\/$/, '');
   const req = requestFn ?? defaultRequest;
   const soql =
-    "SELECT Id FROM RecordType WHERE SObjectType = 'ADM_Work__c' AND DeveloperName = 'User_Story' LIMIT 1";
+    "SELECT Id, DeveloperName FROM RecordType WHERE SObjectType = 'ADM_Work__c'";
   const res = await req(
     `${base}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
   const data = (await res.json().catch(() => ({}))) as SoqlResponse;
-  if (!res.ok || !data.records?.length) return null;
-  return (data.records[0] as { Id: string }).Id;
+  const map: Record<string, string> = {};
+  if (res.ok && data.records) {
+    for (const rec of data.records as { Id: string; DeveloperName?: string }[]) {
+      const dn = rec.DeveloperName;
+      if (dn) map[dn] = rec.Id;
+    }
+  }
+  return map;
 }
 
 /** Payload for creating a work item. */
@@ -647,6 +758,7 @@ export interface CreateWorkItemPayload {
   Type__c?: string;
   Epic__c?: string;
   Story_Points__c?: number;
+  Severity__c?: string;
   Assignee__c?: string;
 }
 
@@ -677,6 +789,7 @@ export async function createWorkItem(
     Type__c: payload.Type__c ?? 'User Story',
     ...(payload.Epic__c && { Epic__c: payload.Epic__c }),
     ...(payload.Story_Points__c != null && { Story_Points__c: payload.Story_Points__c }),
+    ...(payload.Severity__c && { Severity__c: payload.Severity__c }),
     ...(payload.Assignee__c && { Assignee__c: payload.Assignee__c }),
   };
 

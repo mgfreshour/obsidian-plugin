@@ -91,7 +91,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Provider')
-      .setDesc('LLM provider for AI features (e.g. GUS User Story creation).')
+      .setDesc('LLM provider for AI features (e.g. GUS User Story and Bug creation).')
       .addDropdown((d) => {
         for (const [k, v] of Object.entries(providerOptions)) {
           d.addOption(k, v);
@@ -131,14 +131,14 @@ export class SettingsTab extends PluginSettingTab {
           }),
       );
 
-    containerEl.createEl('h3', { text: 'User Story creation' });
+    containerEl.createEl('h3', { text: 'User Story & Bug creation' });
 
     const datalistId = 'llm-models-userstory';
     const datalistEl = containerEl.createEl('datalist', { attr: { id: datalistId } });
 
     new Setting(containerEl)
       .setName('Model')
-      .setDesc('Model for generating User Story titles and descriptions. Click Load models to fetch from provider.')
+      .setDesc('Model for generating User Story and Bug titles and descriptions. Click Load models to fetch from provider.')
       .addText((text) => {
         text
           .setPlaceholder('e.g. gpt-4o, llama3.2')

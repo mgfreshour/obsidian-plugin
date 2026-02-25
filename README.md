@@ -1,6 +1,6 @@
 # SF-Work-Tracking
 
-OmniFocus and GUS (Salesforce) integrations for Obsidian. Renders tasks and work items inline in markdown code blocks.
+OmniFocus and GUS (Salesforce) integrations for Obsidian. Renders tasks and work items inline in markdown code blocks. GUS blocks include Create User Story and Create Bug buttons for AI-assisted work item creation.
 
 ## Installation
 

@@ -250,7 +250,7 @@ this.addCommand({
 - **Use lit-html for all UI**. Use `html` and `render` from `lit` for templating custom UI (modals, code block content, views, etc.).
 - Prefer `html` template literals with `render(template, container)` over imperative DOM APIs or Obsidian's `Setting` component for custom layouts.
 - Use `@click`, `@input`, `@change` for event handlers; `?disabled`, `?checked`, `?selected` for boolean attributes; `.value`, `.checked` for property binding.
-- Examples: `gus-integration.ts`, `omnifocus-integration.ts`, `create-user-story-modal.ts`.
+- Examples: `gus-integration.ts`, `omnifocus-integration.ts`, `create-user-story-modal.ts`, `create-bug-modal.ts`.
 
 ## Obsidian Plugin Development Guidelines
 

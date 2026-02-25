@@ -14,13 +14,25 @@ import {
   searchEpics,
 } from './gus';
 import type { CachedToken, RequestFn, TokenStorage } from './gus';
-import { CreateUserStoryModal } from './create-user-story-modal';
+import { CreateBugModal } from './create-bug-modal';
 import { CreatePlanModal } from './create-plan-modal';
+import { CreateUserStoryModal } from './create-user-story-modal';
+import { ImproveGusTicketModal } from './improve-gus-ticket-modal';
 import { isLLMConfigured, type LLMPluginContext } from './llm';
 import type { LLMConfig } from './llm';
 
 const GUS_WORK_LOCATOR_URL =
   'https://gus.my.salesforce.com/apex/ADM_WorkLocator?bugorworknumber=';
+
+/** Map work item RecordType.DeveloperName to display emoji. */
+function typeToEmoji(recordTypeDeveloperName: string | undefined): string {
+  if (!recordTypeDeveloperName) return '';
+  const t = recordTypeDeveloperName.toLowerCase();
+  if (t === 'bug') return '🐛';
+  if (t === 'user_story' || t === 'userstory') return '📖';
+  if (t === 'task') return '✅';
+  return '';
+}
 
 /** Lifecycle order: lower = earlier. Used for sorting work items. */
 const STATUS_ORDER: Record<string, number> = {
@@ -111,6 +123,7 @@ export interface GusPluginContext {
   };
   loadData(): Promise<unknown>;
   saveData(data: unknown): Promise<void>;
+  addCommand(command: { id: string; name: string; callback: () => void }): void;
   registerMarkdownCodeBlockProcessor(
     language: string,
     processor: (source: string, el: HTMLElement) => void | Promise<void>,
@@ -121,6 +134,7 @@ type GusWorkItem = {
   name: string;
   subject: string;
   status: string;
+  recordTypeDeveloperName?: string;
   description?: string;
 };
 
@@ -191,9 +205,94 @@ async function updateBlockWithEpic(
 }
 
 /**
- * Register GUS integration: code block processor for work items.
+ * Register GUS integration: code block processor for work items and Improve GUS Ticket command.
  */
 export function registerGusIntegration(plugin: GusPluginContext): void {
+  const gusTokenStorage: TokenStorage = {
+    get: () =>
+      plugin.loadData().then(
+        (d) => (d as { gusToken?: CachedToken })?.gusToken ?? null,
+      ),
+    set: (data) =>
+      plugin.loadData().then((d) =>
+        plugin.saveData({ ...(d ?? {}), gusToken: data }),
+      ),
+  };
+
+  const getLLMConfig = (): LLMConfig => ({
+    provider: (plugin.settings?.llmProvider ?? 'openrouter') as LLMConfig['provider'],
+    apiKey: plugin.settings?.llmApiKey ?? '',
+    baseUrl: plugin.settings?.llmBaseUrl?.trim() || undefined,
+    model:
+      plugin.settings?.llmModelUserStory?.trim() ||
+      plugin.settings?.llmModel?.trim() ||
+      undefined,
+  });
+
+  const llmCtx: LLMPluginContext = {
+    getConfig: getLLMConfig,
+    requestUrl: async (opts) => {
+      const res = await requestUrl({
+        url: opts.url,
+        method: opts.method ?? 'GET',
+        headers: opts.headers,
+        body: opts.body,
+        throw: false,
+      });
+      return {
+        status: res.status,
+        json: res.json,
+      };
+    },
+  };
+
+  const openBrowser = (url: string) => {
+    if (typeof require !== 'undefined') {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require('electron').shell.openExternal(url);
+      } catch {
+        window.open(url);
+      }
+    } else {
+      window.open(url);
+    }
+  };
+
+  const gusRequestFn: RequestFn = async (url, options) => {
+    const res = await requestUrl({
+      url,
+      method: options?.method ?? 'GET',
+      headers: options?.headers,
+      body: options?.body,
+      throw: false,
+    });
+    return {
+      ok: res.status >= 200 && res.status < 300,
+      status: res.status,
+      json: () => Promise.resolve(res.json),
+    };
+  };
+
+  plugin.addCommand({
+    id: 'improve-gus-ticket',
+    name: 'Improve GUS Ticket',
+    callback: () => {
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
+      }
+      const modal = new ImproveGusTicketModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
+      });
+      modal.open();
+    },
+  });
+
   plugin.registerMarkdownCodeBlockProcessor('gus', (source, el) => {
     const container = el.createDiv({ cls: 'gus-container' });
     const btnRow = container.createDiv({ cls: 'gus-btn-row' });
@@ -207,44 +306,6 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
     const epicMatch = /^epic:\s*(.*)$/i.exec(firstLine);
     const epicQuery = epicMatch ? epicMatch[1].trim() : '';
     const isEpicMode = epicMatch !== null && epicQuery !== '';
-
-    const gusTokenStorage: TokenStorage = {
-      get: () =>
-        plugin.loadData().then(
-          (d) => (d as { gusToken?: CachedToken })?.gusToken ?? null,
-        ),
-      set: (data) =>
-        plugin.loadData().then((d) =>
-          plugin.saveData({ ...(d ?? {}), gusToken: data }),
-        ),
-    };
-
-    const getLLMConfig = (): LLMConfig => ({
-      provider: (plugin.settings?.llmProvider ?? 'openrouter') as LLMConfig['provider'],
-      apiKey: plugin.settings?.llmApiKey ?? '',
-      baseUrl: plugin.settings?.llmBaseUrl?.trim() || undefined,
-      model:
-        plugin.settings?.llmModelUserStory?.trim() ||
-        plugin.settings?.llmModel?.trim() ||
-        undefined,
-    });
-
-    const llmCtx: LLMPluginContext = {
-      getConfig: getLLMConfig,
-      requestUrl: async (opts) => {
-        const res = await requestUrl({
-          url: opts.url,
-          method: opts.method ?? 'GET',
-          headers: opts.headers,
-          body: opts.body,
-          throw: false,
-        });
-        return {
-          status: res.status,
-          json: res.json,
-        };
-      },
-    };
 
     const onCreatePlanClick = () => {
       if (!isLLMConfigured(getLLMConfig())) {
@@ -277,6 +338,31 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       modal.open();
     };
 
+    const onCreateBugClick = () => {
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
+      }
+      const modal = new CreateBugModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
+        onSuccess: async (workItemName) => {
+          const inserted = await insertWorkItemIntoBlock(
+            plugin.app,
+            source,
+            workItemName,
+          );
+          if (inserted) {
+            new Notice(`Added ${workItemName} to block.`);
+          }
+        },
+      });
+      modal.open();
+    };
+
     const onCreateUserStoryClick = () => {
       if (!isLLMConfigured(getLLMConfig())) {
         new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
@@ -302,32 +388,19 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       modal.open();
     };
 
-    const openBrowser = (url: string) => {
-      if (typeof require !== 'undefined') {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          require('electron').shell.openExternal(url);
-        } catch {
-          window.open(url);
-        }
-      } else {
-        window.open(url);
+    const onCreateImproveTicketClick = () => {
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
       }
-    };
-
-    const gusRequestFn: RequestFn = async (url, options) => {
-      const res = await requestUrl({
-        url,
-        method: options?.method ?? 'GET',
-        headers: options?.headers,
-        body: options?.body,
-        throw: false,
+      const modal = new ImproveGusTicketModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
       });
-      return {
-        ok: res.status >= 200 && res.status < 300,
-        status: res.status,
-        json: () => Promise.resolve(res.json),
-      };
+      modal.open();
     };
 
     const createBtn = btnRow.createEl('button', {
@@ -336,11 +409,23 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
     });
     createBtn.addEventListener('click', onCreateUserStoryClick);
 
+    const createBugBtn = btnRow.createEl('button', {
+      cls: 'gus-create-btn',
+      text: 'Create Bug',
+    });
+    createBugBtn.addEventListener('click', onCreateBugClick);
+
     const createPlanBtn = btnRow.createEl('button', {
       cls: 'gus-create-plan-btn',
       text: 'Create Plan',
     });
     createPlanBtn.addEventListener('click', onCreatePlanClick);
+
+    const improveTicketBtn = btnRow.createEl('button', {
+      cls: 'gus-create-btn',
+      text: 'Improve Ticket',
+    });
+    improveTicketBtn.addEventListener('click', onCreateImproveTicketClick);
 
     const onDescriptionToggle = (e: Event) => {
       e.stopPropagation();
@@ -358,6 +443,23 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       e.preventDefault();
       const url = `${GUS_WORK_LOCATOR_URL}${encodeURIComponent(itemName)}`;
       openBrowser(url);
+    };
+
+    const onImproveClick = (itemName: string) => (e: Event) => {
+      e.preventDefault();
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
+      }
+      const modal = new ImproveGusTicketModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
+        initialTicketName: itemName,
+      });
+      modal.open();
     };
 
     const renderView = (
@@ -427,7 +529,7 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
                   >${item.status}</span
                 >
                 <div class="gus-header">
-                  <span class="gus-title">${item.name}: ${item.subject}
+                  <span class="gus-title">${typeToEmoji(item.recordTypeDeveloperName)} ${item.name}: ${item.subject}
                   ${item.description
                     ? html`<span
                         class="gus-description-toggle"
@@ -442,6 +544,13 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
                     @click=${onLinkClick(item.name)}
                     >↗</a
                   >
+                  <button
+                    class="gus-improve-btn"
+                    title="Improve this ticket"
+                    @click=${onImproveClick(item.name)}
+                  >
+                    Improve
+                  </button>
                     </span>
                 </div>
                 ${item.description
@@ -510,7 +619,7 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
             return;
           }
           const epicId = epics[0].Id.replace(/'/g, "''");
-          const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c FROM ADM_Work__c WHERE Epic__c = '${epicId}'`;
+          const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c, RecordType.DeveloperName FROM ADM_Work__c WHERE Epic__c = '${epicId}'`;
           const items = await queryWorkItems(
             accessToken,
             instanceUrl,
@@ -533,7 +642,7 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
 
         const escapedIds = workItemIds.map((id) => id.replace(/'/g, "''"));
         const inList = "'" + escapedIds.join("','") + "'";
-        const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c FROM ADM_Work__c WHERE Name IN (${inList})`;
+        const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c, RecordType.DeveloperName FROM ADM_Work__c WHERE Name IN (${inList})`;
         const items = await queryWorkItems(
           accessToken,
           instanceUrl,

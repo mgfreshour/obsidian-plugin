@@ -1,5 +1,5 @@
 /**
- * Modal for creating a GUS User Story with AI-generated content via LLM.
+ * Modal for creating a GUS Bug with AI-generated content via LLM.
  * Uses lit-html for all UI rendering.
  */
 
@@ -23,39 +23,49 @@ import type {
   TokenStorage,
 } from './gus';
 
-const WORK_ITEM_SYSTEM_PROMPT = `You are helping to create a GUS work item (similar to a Jira ticket).
+const BUG_SYSTEM_PROMPT = `You are helping to create a GUS bug report (similar to a Jira bug ticket).
 
-Based on the user's summary and any additional context, generate a well-structured work item.
+Based on the user's summary and any additional context, generate a well-structured bug report.
 
 GUIDELINES:
-- Be professional and concise. Focus on the key changes without excessive detail.
+- Be professional and concise. Focus on reproduction steps and expected vs actual behavior.
 - The title should be descriptive but no more than 80 characters.
-- Write the description from the perspective of someone creating the ticket before the work starts. Use a forward-looking tone.
-- Use markdown headers for structure: '##' for main sections (e.g., '## Overview'), '###' for subsections.
+- The description MUST include these sections:
+  - ## Overview (brief summary of the issue)
+  - ## Steps to Reproduce (numbered steps)
+  - ## Expected vs Actual (what should happen vs what actually happens)
+  - ## Environment (optional: OS, browser, version, etc. if relevant)
 - Use standard bullet points (- item) for lists. DO NOT use checkboxes.
 
-Estimate story points. Valid values: 1, 2, 3, or 5.
-- 1 = Trivial changes
-- 2 = Small changes
-- 3 = Medium changes
-- 5 = Large changes
+Recommend a severity. Valid values: Crash, Bug - no workaround, Bug - workaround, Annoying, Cosmetic, Major Feature, Minor Feature, Trivial.
 
 IMPORTANT: You MUST output your final answer wrapped in tags like this:
 <workItem>
-{"title": "<TITLE>", "description": "<DESCRIPTION>", "story_points": <1|2|3|5>}
+{"title": "<TITLE>", "description": "<DESCRIPTION>", "severity": "<SEVERITY>"}
 </workItem>
 
 Output only the <workItem>...</workItem> block as your final answer.`;
 
+const SEVERITY_OPTIONS = [
+  'Crash',
+  'Bug - no workaround',
+  'Bug - workaround',
+  'Annoying',
+  'Cosmetic',
+  'Major Feature',
+  'Minor Feature',
+  'Trivial',
+] as const;
+
 type Step = 1 | 2;
 
-interface WorkItemPreview {
+interface BugPreview {
   title: string;
   description: string;
-  story_points: number | null;
+  severity: string | null;
 }
 
-export interface CreateUserStoryModalOptions {
+export interface CreateBugModalOptions {
   app: App;
   llmCtx: LLMPluginContext;
   requestFn: RequestFn;
@@ -65,12 +75,12 @@ export interface CreateUserStoryModalOptions {
   blockSource?: string;
 }
 
-export class CreateUserStoryModal extends Modal {
-  private readonly opts: CreateUserStoryModalOptions;
+export class CreateBugModal extends Modal {
+  private readonly opts: CreateBugModalOptions;
   private step: Step = 1;
   private summary = '';
   private includeNoteContext = true;
-  private preview: WorkItemPreview | null = null;
+  private preview: BugPreview | null = null;
   private generating = false;
   private productTagSearch = '';
   private productTagResults: ProductTagSearchResult[] = [];
@@ -80,16 +90,17 @@ export class CreateUserStoryModal extends Modal {
   private epicResults: EpicSearchResult[] = [];
   private selectedEpic: EpicSearchResult | null = null;
   private searchingEpics = false;
-  private storyPoints: number | null = null;
+  private severity: string | null = null;
   private creating = false;
 
-  constructor(app: App, opts: CreateUserStoryModalOptions) {
+  constructor(app: App, opts: CreateBugModalOptions) {
     super(app);
     this.opts = opts;
   }
 
   onOpen(): void {
-    this.containerEl.addClass('gus-create-user-story-modal');
+    this.containerEl.addClass('gus-create-bug-modal');
+    this.containerEl.addClass('gus-create-user-story-modal'); // reuse modal sizing styles
     this.render();
   }
 
@@ -127,9 +138,9 @@ export class CreateUserStoryModal extends Modal {
     const onCancel = () => this.close();
 
     return html`
-      <h2>Create User Story</h2>
+      <h2>Create Bug</h2>
       <p class="gus-create-desc">
-        Enter a summary of the work. The AI will generate a title and description.
+        Enter a summary of the bug. The AI will generate a title, description, and severity.
       </p>
 
       <div class="setting-item">
@@ -137,7 +148,7 @@ export class CreateUserStoryModal extends Modal {
         <div class="setting-item-control">
           <textarea
             class="gus-create-summary"
-            placeholder="e.g., Add user authentication feature"
+            placeholder="e.g., Login fails when using SSO with expired session"
             rows="4"
             .value=${this.summary}
             @input=${onSummaryInput}
@@ -148,7 +159,7 @@ export class CreateUserStoryModal extends Modal {
       <div class="setting-item">
         <div class="setting-item-name">Include active note as context</div>
         <div class="setting-item-description">
-          Use the current note content to help generate the work item.
+          Use the current note content to help generate the bug report.
         </div>
         <div class="setting-item-control">
           <input
@@ -197,17 +208,17 @@ export class CreateUserStoryModal extends Modal {
 
     try {
       const response = await simpleChat(this.opts.llmCtx, userMessage, {
-        systemPrompt: WORK_ITEM_SYSTEM_PROMPT,
+        systemPrompt: BUG_SYSTEM_PROMPT,
         max_tokens: 2000,
       });
 
-      const parsed = this.parseWorkItemResponse(response);
+      const parsed = this.parseBugResponse(response);
       if (parsed) {
         this.preview = parsed;
-        this.storyPoints = parsed.story_points;
+        this.severity = parsed.severity;
         this.step = 2;
       } else {
-        new Notice('Could not parse work item from AI response. Try again.');
+        new Notice('Could not parse bug from AI response. Try again.');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -217,21 +228,23 @@ export class CreateUserStoryModal extends Modal {
     this.render();
   }
 
-  private parseWorkItemResponse(text: string): WorkItemPreview | null {
+  private parseBugResponse(text: string): BugPreview | null {
     const match = text.match(/<workItem>\s*([\s\S]*?)<\/workItem>/);
     if (!match) return null;
     try {
       const parsed = JSON.parse(match[1].trim()) as {
         title?: string;
         description?: string;
-        story_points?: number;
+        severity?: string;
       };
       const title = String(parsed.title ?? 'Untitled').slice(0, 255);
       const description = String(parsed.description ?? '');
-      const sp = parsed.story_points;
-      const story_points =
-        sp != null && [1, 2, 3, 5].includes(sp) ? sp : null;
-      return { title, description, story_points };
+      const sev = parsed.severity;
+      const severity =
+        sev && (SEVERITY_OPTIONS as readonly string[]).includes(sev)
+          ? sev
+          : null;
+      return { title, description, severity };
     } catch {
       return null;
     }
@@ -246,9 +259,9 @@ export class CreateUserStoryModal extends Modal {
     const onDescInput = (e: Event) => {
       p.description = (e.target as HTMLTextAreaElement).value;
     };
-    const onStoryPointsChange = (e: Event) => {
+    const onSeverityChange = (e: Event) => {
       const v = (e.target as HTMLSelectElement).value;
-      this.storyPoints = v ? parseInt(v, 10) : null;
+      this.severity = v || null;
       this.render();
     };
     const onProductTagSearchInput = (e: Event) => {
@@ -317,14 +330,14 @@ export class CreateUserStoryModal extends Modal {
       </div>
 
       <div class="setting-item">
-        <div class="setting-item-name">Story points</div>
+        <div class="setting-item-name">Severity</div>
         <div class="setting-item-control">
-          <select @change=${onStoryPointsChange}>
+          <select @change=${onSeverityChange}>
             <option value="">--</option>
-            <option value="1" ?selected=${this.storyPoints === 1}>1</option>
-            <option value="2" ?selected=${this.storyPoints === 2}>2</option>
-            <option value="3" ?selected=${this.storyPoints === 3}>3</option>
-            <option value="5" ?selected=${this.storyPoints === 5}>5</option>
+            ${SEVERITY_OPTIONS.map(
+              (s) =>
+                html`<option value=${s} ?selected=${this.severity === s}>${s}</option>`,
+            )}
           </select>
         </div>
       </div>
@@ -487,7 +500,7 @@ export class CreateUserStoryModal extends Modal {
     });
   }
 
-  private async doCreate(p: WorkItemPreview): Promise<void> {
+  private async doCreate(p: BugPreview): Promise<void> {
     this.creating = true;
     this.render();
 
@@ -498,9 +511,9 @@ export class CreateUserStoryModal extends Modal {
         instanceUrl,
         this.opts.requestFn,
       );
-      const recordTypeId = recordTypeMap['User_Story'];
+      const recordTypeId = recordTypeMap['Bug'];
       if (!recordTypeId) {
-        throw new Error('Could not get User Story record type');
+        throw new Error('Could not get Bug record type');
       }
 
       const payload: CreateWorkItemPayload = {
@@ -508,9 +521,9 @@ export class CreateUserStoryModal extends Modal {
         Details__c: convertTextToHtml(p.description),
         Product_Tag__c: this.selectedProductTag!.Id,
         RecordTypeId: recordTypeId,
-        Type__c: 'User Story',
+        Type__c: 'Bug',
         ...(this.selectedEpic && { Epic__c: this.selectedEpic.Id }),
-        ...(this.storyPoints != null && { Story_Points__c: this.storyPoints }),
+        ...(this.severity && { Severity__c: this.severity }),
       };
 
       const result = await createWorkItem(
@@ -533,6 +546,7 @@ export class CreateUserStoryModal extends Modal {
   }
 
   onClose(): void {
+    this.containerEl.removeClass('gus-create-bug-modal');
     this.containerEl.removeClass('gus-create-user-story-modal');
     this.contentEl.empty();
   }
