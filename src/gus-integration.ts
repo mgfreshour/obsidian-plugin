@@ -11,6 +11,7 @@ import {
   getAuthenticatedClient,
   loginViaBrowser,
   queryWorkItems,
+  searchEpics,
 } from './gus';
 import type { CachedToken, RequestFn, TokenStorage } from './gus';
 import { CreateUserStoryModal } from './create-user-story-modal';
@@ -164,10 +165,15 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
     const container = el.createDiv({ cls: 'gus-container' });
     const btnRow = container.createDiv({ cls: 'gus-btn-row' });
     const contentDiv = container.createDiv({ cls: 'gus-content' });
-    const workItemIds = source
+    const trimmedLines = source
       .split(/\n/)
       .map((s) => s.trim())
       .filter(Boolean);
+    const workItemIds = trimmedLines;
+    const firstLine = trimmedLines[0] ?? '';
+    const epicMatch = /^epic:\s*(.*)$/i.exec(firstLine);
+    const epicQuery = epicMatch ? epicMatch[1].trim() : '';
+    const isEpicMode = epicMatch !== null && epicQuery !== '';
 
     const gusTokenStorage: TokenStorage = {
       get: () =>
@@ -381,9 +387,11 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       );
     };
 
-    if (workItemIds.length === 0) {
+    const showUsage =
+      workItemIds.length === 0 || (epicMatch !== null && epicQuery === '');
+    if (showUsage) {
       render(
-        html`<p class="gus-usage">Enter work item IDs (one per line, e.g. W-12345)</p>`,
+        html`<p class="gus-usage">Enter work item IDs (one per line, e.g. W-12345) or epic: &lt;name&gt; to show all tickets in an epic.</p>`,
         contentDiv,
       );
       return;
@@ -408,6 +416,51 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
           openBrowser,
           requestFn: gusRequestFn,
         });
+
+        if (isEpicMode) {
+          const epics = await searchEpics(
+            accessToken,
+            instanceUrl,
+            epicQuery,
+            gusRequestFn,
+            false, // search all epics, not just user's teams
+          );
+          if (epics.length === 0) {
+            renderView({
+              type: 'error',
+              message: `No epics found for: ${epicQuery}`,
+            });
+            return;
+          }
+          if (epics.length > 1) {
+            renderView({
+              type: 'error',
+              message: `Multiple epics found (be more specific): ${epics.map((e) => e.Name).join(', ')}`,
+            });
+            return;
+          }
+          const epicId = epics[0].Id.replace(/'/g, "''");
+          const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c FROM ADM_Work__c WHERE Epic__c = '${epicId}'`;
+          const items = await queryWorkItems(
+            accessToken,
+            instanceUrl,
+            soql,
+            gusRequestFn,
+          );
+          items.sort((a, b) => {
+            const orderA = statusSortOrder(a.status);
+            const orderB = statusSortOrder(b.status);
+            if (orderA !== orderB) return orderA - orderB;
+            return a.name.localeCompare(b.name);
+          });
+          renderView({
+            type: 'workItems',
+            items,
+            missing: [],
+          });
+          return;
+        }
+
         const escapedIds = workItemIds.map((id) => id.replace(/'/g, "''"));
         const inList = "'" + escapedIds.join("','") + "'";
         const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c FROM ADM_Work__c WHERE Name IN (${inList})`;
