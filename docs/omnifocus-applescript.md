@@ -142,6 +142,83 @@ literal `\n` before output so each task stays on one line.
 application "OmniFocus"` / `tell default document` block. Reading them
 outside causes "Access not allowed" (-1723).
 
+### Create Inbox Task
+
+```applescript
+on run argv
+  set taskName to item 1 of argv
+  set taskNote to item 2 of argv
+  tell application "OmniFocus"
+    tell default document
+      make new inbox task with properties {name: taskName, note: taskNote}
+    end tell
+  end tell
+end run
+```
+
+Called with: `execFile('osascript', ['-e', script, taskName, taskNote])`
+
+**Note**: Pass `name` and `note` via `argv` to avoid encoding issues with
+non-ASCII characters (see Gotcha 3).
+
+### Create Task in a Project
+
+```applescript
+on run argv
+  set projectName to item 1 of argv
+  set taskName to item 2 of argv
+  set taskNote to item 3 of argv
+  tell application "OmniFocus"
+    tell default document
+      set proj to first flattened project whose name is projectName
+      make new task at end of tasks of proj with properties {name: taskName, note: taskNote}
+    end tell
+  end tell
+end run
+```
+
+### Update Task
+
+Get a task by `id` and set properties:
+
+```applescript
+on run argv
+  set taskId to item 1 of argv
+  set taskName to item 2 of argv
+  set taskNote to item 3 of argv
+  tell application "OmniFocus"
+    tell default document
+      set theTask to first flattened task whose id is taskId
+      set name of theTask to taskName
+      set note of theTask to taskNote
+    end tell
+  end tell
+end run
+```
+
+**Note**: The `completed` property is read-only (since OmniFocus 2.12). Use
+`mark complete` or `mark incomplete` commands instead of `set completed`. Other
+settable properties include `due date`, `primary tag`, etc. Use `id` from a fetch
+to target a specific task.
+
+### Mark Task Complete
+
+The `completed` property is read-only. Use the `mark complete` command:
+
+```applescript
+on run argv
+  set taskId to item 1 of argv
+  tell application "OmniFocus"
+    tell default document
+      set theTask to first flattened task whose id is taskId
+      mark complete theTask
+    end tell
+  end tell
+end run
+```
+
+Called with: `execFile('osascript', ['-e', script, taskId])`
+
 ### List Perspectives
 
 ```applescript

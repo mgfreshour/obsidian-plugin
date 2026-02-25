@@ -1,8 +1,9 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, SettingsTab } from './src/settings';
 import type { PluginSettings } from './src/settings';
-import { fetchTasks, parseSource, sourceLabel } from './src/omnifocus';
+import { completeTask, createTask, fetchTasks, parseSource, sourceLabel } from './src/omnifocus';
 import type { OmniFocusTask, TaskSource } from './src/omnifocus';
+import { AddTaskModal } from './src/add-task-modal';
 
 const INBOX_FILE = 'Sample Note.md';
 
@@ -58,7 +59,12 @@ export default class ObsidianPlugin extends Plugin {
 
       const label = sourceLabel(taskSource);
 
-      const btn = container.createEl('button', {
+      const btnRow = container.createDiv({ cls: 'omnifocus-btn-row' });
+      const addBtn = btnRow.createEl('button', {
+        text: 'Add task',
+        cls: 'omnifocus-add-btn',
+      });
+      const btn = btnRow.createEl('button', {
         text: `Sync OmniFocus ${label}`,
         cls: 'omnifocus-sync-btn',
       });
@@ -78,6 +84,23 @@ export default class ObsidianPlugin extends Plugin {
         } else {
           for (const task of tasks) {
             const li = listEl.createEl('li', { cls: 'omnifocus-task-item' });
+            const checkbox = li.createEl('input', { cls: 'omnifocus-task-checkbox' });
+            checkbox.type = 'checkbox';
+            checkbox.title = 'Mark complete';
+            checkbox.addEventListener('change', async () => {
+              checkbox.disabled = true;
+              try {
+                await completeTask(task.id);
+                new Notice('Task completed.');
+                doFetch();
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                console.error('OmniFocus complete task failed:', err);
+                new Notice(`OmniFocus error: ${message}`);
+                checkbox.checked = false;
+                checkbox.disabled = false;
+              }
+            });
             li.createSpan({ text: task.name, cls: 'omnifocus-task-name' });
             if (task.note) {
               const toggle = li.createSpan({
@@ -126,6 +149,14 @@ export default class ObsidianPlugin extends Plugin {
       };
 
       btn.addEventListener('click', doFetch);
+
+      addBtn.addEventListener('click', () => {
+        new AddTaskModal(this.app, taskSource, async (title, note) => {
+          await createTask(taskSource, title, note);
+          new Notice(`Created task in ${label}.`);
+          doFetch();
+        }).open();
+      });
 
       // Auto-fetch on render
       doFetch();

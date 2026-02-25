@@ -267,7 +267,7 @@ on run argv
   tell application "OmniFocus"
     tell default document
       set proj to first flattened project whose name is projectName
-      set taskList to every flattened task of proj
+      set taskList to every flattened task of proj whose completed is false
 ` + taskLoop + `
     end tell
   end tell
@@ -336,6 +336,131 @@ export async function fetchTasks(source: TaskSource): Promise<OmniFocusTask[]> {
         return;
       }
       resolve(parseTaskOutput(stdout));
+    });
+  });
+}
+
+/**
+ * Create a task in OmniFocus for the given source.
+ *
+ * - Inbox: creates an inbox task
+ * - Project: creates a task at end of the project
+ * - Tag: creates an inbox task with the tag as primary tag
+ *
+ * @param source - Where to create the task.
+ * @param taskName - The task title.
+ * @param taskNote - Optional task notes.
+ * @throws If `osascript` fails or project/tag not found.
+ */
+export async function createTask(
+  source: TaskSource,
+  taskName: string,
+  taskNote = '',
+): Promise<void> {
+  let resolvedSource = source;
+  if (source.kind === 'project') {
+    const projects = await fetchProjectNames();
+    const resolved = resolveName(source.name, projects, 'project');
+    resolvedSource = { kind: 'project', name: resolved };
+  }
+
+  if (source.kind === 'tag') {
+    const tags = await fetchTagNames();
+    const resolved = resolveName(source.name, tags, 'tag');
+    resolvedSource = { kind: 'tag', name: resolved };
+  }
+
+  const script =
+    resolvedSource.kind === 'inbox'
+      ? `
+on run argv
+  set taskName to item 1 of argv
+  set taskNote to item 2 of argv
+  tell application "OmniFocus"
+    tell default document
+      make new inbox task with properties {name: taskName, note: taskNote}
+    end tell
+  end tell
+end run
+`
+      : resolvedSource.kind === 'project'
+        ? `
+on run argv
+  set projectName to item 1 of argv
+  set taskName to item 2 of argv
+  set taskNote to item 3 of argv
+  tell application "OmniFocus"
+    tell default document
+      set proj to first flattened project whose name is projectName
+      make new task at end of tasks of proj with properties {name: taskName, note: taskNote}
+    end tell
+  end tell
+end run
+`
+        : `
+on run argv
+  set tagName to item 1 of argv
+  set taskName to item 2 of argv
+  set taskNote to item 3 of argv
+  tell application "OmniFocus"
+    tell default document
+      set theTag to first flattened tag whose name is tagName
+      set t to make new inbox task with properties {name: taskName, note: taskNote}
+      set primary tag of t to theTag
+    end tell
+  end tell
+end run
+`;
+
+  const args =
+    resolvedSource.kind === 'inbox'
+      ? [taskName, taskNote]
+      : [resolvedSource.name, taskName, taskNote];
+
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', script, ...args], (error, _stdout, stderr) => {
+      if (error) {
+        reject(
+          new Error(
+            `Failed to create OmniFocus ${sourceLabel(resolvedSource)} task: ${stderr || error.message}`,
+          ),
+        );
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+/**
+ * Mark a task as complete in OmniFocus by its persistent id.
+ *
+ * @param taskId - The task's persistent id (from OmniFocusTask.id).
+ * @throws If `osascript` fails or task not found.
+ */
+export async function completeTask(taskId: string): Promise<void> {
+  const script = `
+on run argv
+  set taskId to item 1 of argv
+  tell application "OmniFocus"
+    tell default document
+      set theTask to first flattened task whose id is taskId
+      mark complete theTask
+    end tell
+  end tell
+end run
+`;
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', script, taskId], (error, _stdout, stderr) => {
+      if (error) {
+        reject(
+          new Error(
+            `Failed to complete OmniFocus task: ${stderr || error.message}`,
+          ),
+        );
+        return;
+      }
+      resolve();
     });
   });
 }

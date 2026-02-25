@@ -27,3 +27,4 @@ test-vault/
 # Build output
 dist/
 .cursor
+coverage
