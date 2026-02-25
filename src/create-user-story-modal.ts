@@ -304,12 +304,12 @@ export class CreateUserStoryModal extends Modal {
         </div>
       </div>
 
-      <div class="setting-item">
+      <div class="setting-item setting-item-description">
         <div class="setting-item-name">Description</div>
         <div class="setting-item-control">
           <textarea
             class="gus-create-description"
-            rows="6"
+            rows="16"
             .value=${p.description}
             @input=${onDescInput}
           ></textarea>

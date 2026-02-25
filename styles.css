@@ -236,6 +236,50 @@
   cursor: not-allowed;
 }
 
+/* Create User Story modal – larger size and description area */
+.gus-create-user-story-modal.modal {
+  min-width: 560px;
+  width: 85vw;
+  max-width: 900px;
+  min-height: 70vh;
+  max-height: 90vh;
+}
+
+.gus-create-user-story-modal .modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.gus-create-user-story-modal .setting-item {
+  display: flex;
+}
+
+.gus-create-user-story-modal .setting-item-control {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.gus-create-user-story-modal .setting-item-control input,
+.gus-create-user-story-modal .setting-item-control textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.gus-create-user-story-modal .setting-item-description {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.gus-create-user-story-modal .setting-item-description .setting-item-control {
+  flex: 1 1 auto;
+}
+
+.gus-create-user-story-modal .gus-create-description {
+  min-height: 280px;
+  resize: vertical;
+}
+
 .gus-create-user-story-modal .gus-create-desc {
   color: var(--text-muted);
   font-size: 13px;
