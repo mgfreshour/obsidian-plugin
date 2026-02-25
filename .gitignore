@@ -5,6 +5,7 @@
 
 # Dependencies
 node_modules/
+package-lock.json
 
 # Compiled files
 main.js
@@ -28,3 +29,4 @@ test-vault/
 dist/
 .cursor
 coverage
+gus-ticket-cli

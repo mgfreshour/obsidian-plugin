@@ -1,9 +1,9 @@
 {
-	"id": "obsidian-plugin",
-	"name": "Obsidian Plugin",
+	"id": "sf-work-tracking",
+	"name": "SF-Work-Tracking",
 	"version": "0.1.0",
 	"minAppVersion": "0.15.0",
-	"description": "An Obsidian plugin",
+	"description": "OmniFocus and GUS integrations for Obsidian",
 	"author": "",
 	"authorUrl": "",
 	"isDesktopOnly": true

@@ -209,6 +209,45 @@
 
 /* GUS work item block */
 
+.gus-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.gus-create-btn {
+  cursor: pointer;
+  padding: 8px 18px;
+  border-radius: 6px;
+  border: none;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+
+.gus-create-btn:hover {
+  opacity: 0.9;
+}
+
+.gus-create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gus-create-user-story-modal .gus-create-desc {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.gus-create-user-story-modal .gus-create-selected {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
 .gus-container {
   padding: 16px 20px;
   border: 1px solid var(--background-modifier-border);

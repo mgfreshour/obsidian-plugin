@@ -6,7 +6,7 @@ An Obsidian community plugin that integrates with OmniFocus 4 on macOS. It fetch
 tasks from OmniFocus via AppleScript and displays them inline in markdown code blocks.
 Supports inbox, project, and tag sources with fuzzy substring matching.
 
-- **Plugin ID**: `obsidian-plugin` (set in `manifest.json`)
+- **Plugin ID**: `sf-work-tracking` (set in `manifest.json`)
 - **Version**: 0.1.0
 - **Min Obsidian version**: 0.15.0
 - **Mobile support**: Yes (`isDesktopOnly: false`)
@@ -16,7 +16,7 @@ Supports inbox, project, and tag sources with fuzzy substring matching.
 ## Repository Structure
 
 ```
-obsidian-plugin/
+sf-work-tracking/
 ├── main.ts                         # Plugin entry point (extends Plugin class)
 ├── src/
 │   ├── omnifocus.ts                # OmniFocus AppleScript integration
@@ -25,7 +25,7 @@ obsidian-plugin/
 ├── styles.css                      # Plugin stylesheet
 ├── manifest.json                   # Obsidian plugin manifest (id, version, etc.)
 ├── versions.json                   # Release version tracking (empty)
-├── package.json                    # npm config, scripts, devDependencies
+├── package.json                    # pnpm config, scripts, devDependencies
 ├── tsconfig.json                   # TypeScript strict-mode config
 ├── esbuild.config.mjs              # Bundler: entry=main.ts → main.js (CJS)
 ├── jest.config.js                  # Jest + ts-jest test config
@@ -81,8 +81,8 @@ Key Obsidian lifecycle hooks:
 - **Entry**: `main.ts` → **Output**: `main.js` (CommonJS, ES2018 target)
 - **External** (provided by Obsidian at runtime): `obsidian`, `electron`,
   `@codemirror/*`, `@lezer/*`, all Node.js built-ins
-- **Dev mode** (`npm run dev`): watch mode, inline source maps
-- **Production** (`npm run build`): `tsc --noEmit` type check, then single rebuild, no source maps, tree-shaken
+- **Dev mode** (`pnpm dev`): watch mode, inline source maps
+- **Production** (`pnpm build`): `tsc --noEmit` type check, then single rebuild, no source maps, tree-shaken
 - Adds a banner comment to the output file
 
 ### TypeScript (tsconfig.json)
@@ -91,17 +91,17 @@ Key Obsidian lifecycle hooks:
 - Target: ES6, Module: ESNext, Resolution: Node
 - Includes all `**/*.ts`, excludes `node_modules` and `test-vault`
 
-### npm Scripts
+### pnpm Scripts
 
 | Script              | Command                                       | Purpose                          |
 |---------------------|-----------------------------------------------|----------------------------------|
-| `npm run dev`       | `node esbuild.config.mjs`                     | Watch mode with source maps      |
-| `npm run build`     | `tsc --noEmit && node esbuild.config.mjs --production` | Type check + production bundle |
-| `npm test`          | `jest`                                        | Run unit tests                   |
-| `npm run lint`      | `eslint . --ext .ts`                          | Lint TypeScript files            |
-| `npm run lint:fix`  | `eslint . --ext .ts --fix`                    | Auto-fix lint issues             |
-| `npm run generate-vault` | `node scripts/generate-test-vault.mjs`   | Create test vault for manual QA  |
-| `npm run launch`  | `npm run build && npm run generate-vault && node scripts/launch-obsidian.mjs` | Build, generate vault, open Obsidian |
+| `pnpm dev`          | `node esbuild.config.mjs`                     | Watch mode with source maps      |
+| `pnpm build`        | `tsc --noEmit && node esbuild.config.mjs --production` | Type check + production bundle |
+| `pnpm test`         | `jest`                                        | Run unit tests                   |
+| `pnpm lint`         | `eslint . --ext .ts`                          | Lint TypeScript files            |
+| `pnpm lint:fix`     | `eslint . --ext .ts --fix`                    | Auto-fix lint issues             |
+| `pnpm generate-vault` | `node scripts/generate-test-vault.mjs`   | Create test vault for manual QA  |
+| `pnpm launch`       | `pnpm run build && pnpm run generate-vault && node scripts/launch-obsidian.mjs` | Build, generate vault, open Obsidian |
 
 ## Testing
 
@@ -110,7 +110,7 @@ Key Obsidian lifecycle hooks:
 - **Environment**: Node
 - **Coverage**: collected from all `.ts` files (excluding `.d.ts`)
 - Tests co-located with source: `src/omnifocus.test.ts`
-- CLI integration test: `npx tsx scripts/test-omnifocus.ts`
+- CLI integration test: `pnpm exec tsx scripts/test-omnifocus.ts`
 
 ## Linting
 
@@ -128,7 +128,7 @@ Creates a `test-vault/` directory that can be opened in Obsidian for manual test
 - Creates `.obsidian/` config structure with the plugin registered
 - Copies `manifest.json` and `main.js` into the vault's plugins directory
 - Generates sample markdown files (Welcome.md, OmniFocus Tests.md)
-- Requires `npm run build` first so `main.js` exists
+- Requires `pnpm build` first so `main.js` exists
 
 ## Key Obsidian APIs (for future development)
 
@@ -244,6 +244,13 @@ this.addCommand({
 - Keep README.md up to date
 - Document complex algorithms
 - Include usage examples in comments
+
+## UI Rendering
+
+- **Use lit-html for all UI**. Use `html` and `render` from `lit` for templating custom UI (modals, code block content, views, etc.).
+- Prefer `html` template literals with `render(template, container)` over imperative DOM APIs or Obsidian's `Setting` component for custom layouts.
+- Use `@click`, `@input`, `@change` for event handlers; `?disabled`, `?checked`, `?selected` for boolean attributes; `.value`, `.checked` for property binding.
+- Examples: `gus-integration.ts`, `omnifocus-integration.ts`, `create-user-story-modal.ts`.
 
 ## Obsidian Plugin Development Guidelines
 

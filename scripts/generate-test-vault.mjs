@@ -6,26 +6,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 
-// Get plugin name from package.json or use default
-let pluginName = "obsidian-plugin";
+// Get plugin id from manifest.json or use default
+let pluginId = "sf-work-tracking";
 try {
-	const packageJson = JSON.parse(
-		fs.readFileSync(path.join(rootDir, "package.json"), "utf8")
+	const manifest = JSON.parse(
+		fs.readFileSync(path.join(rootDir, "manifest.json"), "utf8")
 	);
-	pluginName = packageJson.name || pluginName;
+	pluginId = manifest.id || pluginId;
 } catch (error) {
-	console.warn("Could not read package.json, using default plugin name");
+	console.warn("Could not read manifest.json, using default plugin id");
 }
 
 // Allow override via command line argument
 if (process.argv[2]) {
-	pluginName = process.argv[2];
+	pluginId = process.argv[2];
 }
 
 const testVaultDir = path.join(rootDir, "test-vault");
 const obsidianDir = path.join(testVaultDir, ".obsidian");
 const pluginsDir = path.join(obsidianDir, "plugins");
-const pluginDir = path.join(pluginsDir, pluginName);
+const pluginDir = path.join(pluginsDir, pluginId);
 
 // Create directory structure
 function ensureDir(dirPath) {
@@ -58,7 +58,7 @@ try {
 		fs.copyFileSync(mainJsSrc, mainJsDest);
 		console.log(`Copied main.js to ${mainJsDest}`);
 	} else {
-		console.warn(`main.js not found at ${mainJsSrc}. Run 'npm run build' first.`);
+		console.warn(`main.js not found at ${mainJsSrc}. Run 'pnpm build' first.`);
 	}
 
 	// Copy styles.css (if it exists)
@@ -80,7 +80,7 @@ try {
 
 	// Create .obsidian/community-plugins.json
 	const communityPluginsPath = path.join(obsidianDir, "community-plugins.json");
-	const communityPlugins = [pluginName];
+	const communityPlugins = [pluginId];
 	fs.writeFileSync(communityPluginsPath, JSON.stringify(communityPlugins, null, 2));
 	console.log(`Created ${communityPluginsPath}`);
 
@@ -115,13 +115,20 @@ try {
 			name: "Welcome.md",
 			content: `# Welcome to Obsidian
 
-This is a test vault for developing and testing the ${pluginName} plugin.
+This is a test vault for developing and testing the ${pluginId} plugin.
 
 ## Getting Started
 
 - Edit this file to test your plugin
 - Create new notes to test various features
 - Use the command palette (Cmd/Ctrl+P) to access plugin commands
+\`\`\`gus
+W-21276903
+W-20680369
+W-21337266
+
+\`\`\`
+
 `
 		},
 		{
@@ -191,7 +198,7 @@ tag: xyznonexistent
 	}
 
 	console.log(`\n✅ Test vault created successfully at: ${testVaultDir}`);
-	console.log(`Plugin name: ${pluginName}`);
+	console.log(`Plugin id: ${pluginId}`);
 	console.log(`\nTo use this vault:`);
 	console.log(`1. Open Obsidian`);
 	console.log(`2. Open vault from folder: ${testVaultDir}`);

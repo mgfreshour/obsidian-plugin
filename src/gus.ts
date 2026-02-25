@@ -404,6 +404,328 @@ export async function queryWorkItems(
 }
 
 /**
+ * Escape a string for use in SOQL LIKE patterns (double single quotes).
+ */
+function escapeSoqlString(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+/**
+ * Escape SOSL reserved characters: ? & | ! { } [ ] ( ) ^ ~ : \ " ' + -
+ * Asterisk (*) is a valid SOSL wildcard — do not escape it.
+ */
+function escapeSoslString(s: string): string {
+  return s.replace(/[?&|!{}[\]()^~:\\"'+=-]/g, '\\$&');
+}
+
+/**
+ * Convert plain text to HTML for Salesforce rich text fields.
+ * Escapes HTML, converts ## to h3, ### to strong, newlines to br.
+ */
+export function convertTextToHtml(text: string): string {
+  const escape = (str: string) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const lines = text.split('\n');
+  const processed: string[] = [];
+  let prevWasHeader = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i].trim();
+    if (stripped === '' && prevWasHeader) {
+      prevWasHeader = false;
+      continue;
+    }
+    if (stripped.startsWith('###')) {
+      const headerText = stripped.slice(3).trim();
+      processed.push(`<strong>${escape(headerText)}</strong>`);
+      prevWasHeader = true;
+    } else if (stripped.startsWith('##')) {
+      const headerText = stripped.slice(2).trim();
+      processed.push(`<h3>${escape(headerText)}</h3>`);
+      prevWasHeader = true;
+    } else {
+      processed.push(escape(lines[i]));
+      prevWasHeader = false;
+    }
+  }
+
+  const result: string[] = [];
+  for (let i = 0; i < processed.length; i++) {
+    result.push(processed[i]);
+    const lineType = processed[i].startsWith('<h3>')
+      ? 'h3'
+      : processed[i].startsWith('<strong>')
+        ? 'strong'
+        : 'normal';
+    if (i < processed.length - 1 && (lineType === 'normal' || lineType === 'strong')) {
+      if (processed[i].trim()) result.push('<br>');
+    }
+  }
+  return result.join('');
+}
+
+/** Product tag search result. */
+export interface ProductTagSearchResult {
+  Id: string;
+  Name: string;
+}
+
+/** Epic search result. */
+export interface EpicSearchResult {
+  Id: string;
+  Name: string;
+}
+
+/** SOSL search response for product tags. */
+interface SoslSearchResponse {
+  searchRecords?: Array<{ Id: string; Name: string }>;
+}
+
+/**
+ * Search for product tags by name using SOSL.
+ * SOSL provides full-text search with relevance ranking and wildcards.
+ */
+export async function searchProductTags(
+  accessToken: string,
+  instanceUrl: string,
+  searchTerm: string,
+  requestFn?: RequestFn,
+): Promise<ProductTagSearchResult[]> {
+  const trimmed = searchTerm.trim();
+  if (!trimmed) return [];
+
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const escaped = escapeSoslString(trimmed);
+  const sosl = `FIND {${escaped}*} IN ALL FIELDS RETURNING ADM_Product_Tag__c(Id, Name) LIMIT 10`;
+  const url = `${base}/services/data/${API_VERSION}/search?q=${encodeURIComponent(sosl)}`;
+  const res = await req(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = (await res.json().catch(() => ({}))) as SoslSearchResponse & {
+    [0]?: { message?: string };
+    message?: string;
+  };
+  if (!res.ok) {
+    const msg =
+      data[0]?.message ?? data.message ?? `HTTP ${res.status}`;
+    throw new Error(`Product tag search failed: ${msg}`);
+  }
+  const records = data.searchRecords ?? [];
+  return records.map((r) => ({ Id: r.Id, Name: r.Name }));
+}
+
+/**
+ * Get current user ID for epic team filtering.
+ * Uses OAuth userinfo endpoint.
+ */
+async function getCurrentUserId(
+  accessToken: string,
+  instanceUrl: string,
+  requestFn?: RequestFn,
+): Promise<string | null> {
+  try {
+    const info = await fetchUserInfo(accessToken, instanceUrl, requestFn);
+    return info?.user_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** SOSL search response for epics. */
+interface SoslEpicSearchResponse {
+  searchRecords?: Array<{ Id: string; Name: string }>;
+}
+
+/**
+ * Fetch team IDs for the current user (for epic team filtering).
+ */
+async function getUserTeamIds(
+  accessToken: string,
+  instanceUrl: string,
+  requestFn?: RequestFn,
+): Promise<string[]> {
+  const userId = await getCurrentUserId(accessToken, instanceUrl, requestFn);
+  if (!userId) return [];
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const escapedUser = escapeSoqlString(userId);
+  const soql = `SELECT Scrum_Team__c FROM ADM_Scrum_Team_Member__c WHERE Member_Name__c = '${escapedUser}' LIMIT 100`;
+  const res = await req(
+    `${base}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const data = (await res.json().catch(() => ({}))) as SoqlResponse;
+  if (!res.ok) return [];
+  const records = (data.records ?? []) as Array<{ Scrum_Team__c?: string }>;
+  return records
+    .map((r) => r.Scrum_Team__c)
+    .filter((id): id is string => !!id);
+}
+
+/**
+ * Search for epics by name using SOSL for fuzzy full-text search.
+ * When restrictToMyTeams is true, only returns epics from teams the user belongs to.
+ */
+export async function searchEpics(
+  accessToken: string,
+  instanceUrl: string,
+  searchTerm: string,
+  requestFn?: RequestFn,
+  restrictToMyTeams = true,
+): Promise<EpicSearchResult[]> {
+  const trimmed = searchTerm.trim();
+  if (!trimmed) return [];
+
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const escaped = escapeSoslString(trimmed);
+
+  let whereClause = '';
+  if (restrictToMyTeams) {
+    const teamIds = await getUserTeamIds(accessToken, instanceUrl, requestFn);
+    if (teamIds.length > 0) {
+      const quotedIds = teamIds
+        .map((id) => `'${id.replace(/'/g, "''")}'`)
+        .join(',');
+      whereClause = ` WHERE Team__c IN (${quotedIds})`;
+    }
+  }
+
+  const sosl = `FIND {${escaped}*} IN ALL FIELDS RETURNING ADM_Epic__c(Id, Name${whereClause}) LIMIT 10`;
+  const url = `${base}/services/data/${API_VERSION}/search?q=${encodeURIComponent(sosl)}`;
+  const res = await req(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const data = (await res.json().catch(() => ({}))) as SoslEpicSearchResponse & {
+    [0]?: { message?: string };
+    message?: string;
+  };
+  if (!res.ok) {
+    const msg =
+      data[0]?.message ?? data.message ?? `HTTP ${res.status}`;
+    throw new Error(`Epic search failed: ${msg}`);
+  }
+  const records = data.searchRecords ?? [];
+  return records.map((r) => ({ Id: r.Id, Name: r.Name }));
+}
+
+/**
+ * Get RecordTypeId for User Story work items.
+ */
+export async function getUserStoryRecordTypeId(
+  accessToken: string,
+  instanceUrl: string,
+  requestFn?: RequestFn,
+): Promise<string | null> {
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const soql =
+    "SELECT Id FROM RecordType WHERE SObjectType = 'ADM_Work__c' AND DeveloperName = 'User_Story' LIMIT 1";
+  const res = await req(
+    `${base}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const data = (await res.json().catch(() => ({}))) as SoqlResponse;
+  if (!res.ok || !data.records?.length) return null;
+  return (data.records[0] as { Id: string }).Id;
+}
+
+/** Payload for creating a work item. */
+export interface CreateWorkItemPayload {
+  Subject__c: string;
+  Details__c: string;
+  Product_Tag__c: string;
+  RecordTypeId: string;
+  Type__c?: string;
+  Epic__c?: string;
+  Story_Points__c?: number;
+  Assignee__c?: string;
+}
+
+/** Result of creating a work item. */
+export interface CreateWorkItemResult {
+  id: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * Create a work item in GUS and return its id and name.
+ */
+export async function createWorkItem(
+  accessToken: string,
+  instanceUrl: string,
+  payload: CreateWorkItemPayload,
+  requestFn?: RequestFn,
+): Promise<CreateWorkItemResult> {
+  const base = instanceUrl.replace(/\/$/, '');
+  const req = requestFn ?? defaultRequest;
+  const url = `${base}/services/data/${API_VERSION}/sobjects/ADM_Work__c`;
+  const body = {
+    Subject__c: payload.Subject__c,
+    Details__c: payload.Details__c,
+    Product_Tag__c: payload.Product_Tag__c,
+    RecordTypeId: payload.RecordTypeId,
+    Type__c: payload.Type__c ?? 'User Story',
+    ...(payload.Epic__c && { Epic__c: payload.Epic__c }),
+    ...(payload.Story_Points__c != null && { Story_Points__c: payload.Story_Points__c }),
+    ...(payload.Assignee__c && { Assignee__c: payload.Assignee__c }),
+  };
+
+  const res = await req(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    id?: string;
+    success?: boolean;
+    errors?: unknown[];
+  };
+
+  if (!res.ok || !data.success) {
+    const msg =
+      (Array.isArray(data.errors) ? data.errors[0] : data.errors) as { message?: string } | undefined;
+    throw new Error(
+      msg?.message ?? `Create work item failed: HTTP ${res.status}`,
+    );
+  }
+
+  const workItemId = data.id as string;
+  if (!workItemId) throw new Error('Create work item returned no id');
+
+  // Fetch the record to get the Name (e.g. W-12345)
+  const soql = `SELECT Id, Name FROM ADM_Work__c WHERE Id = '${workItemId.replace(/'/g, "''")}' LIMIT 1`;
+  const getRes = await req(
+    `${base}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const getData = (await getRes.json().catch(() => ({}))) as SoqlResponse;
+  const name =
+    getData.records?.[0] && 'Name' in getData.records[0]
+      ? String((getData.records[0] as { Name?: string }).Name ?? workItemId)
+      : workItemId;
+
+  return {
+    id: workItemId,
+    name,
+    url: `${base}/${workItemId}`,
+  };
+}
+
+/**
  * Substitute placeholders in a query template.
  * Placeholders: ${me}, ${team}, ${product_tag}
  * Unknown placeholders are left unchanged.

@@ -22,7 +22,22 @@ export default class ObsidianPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const raw = await this.loadData();
+    const migrated = raw as Record<string, unknown>;
+    if (
+      migrated?.openRouterApiKey != null &&
+      (migrated.llmProvider == null || migrated.llmApiKey == null)
+    ) {
+      migrated.llmProvider = 'openrouter';
+      migrated.llmApiKey = String(migrated.openRouterApiKey);
+      migrated.llmBaseUrl = migrated.llmBaseUrl ?? '';
+      migrated.llmModel = migrated.llmModel ?? '';
+      delete migrated.openRouterApiKey;
+    }
+    if (migrated.llmModelUserStory == null && migrated.llmModel != null) {
+      migrated.llmModelUserStory = migrated.llmModel;
+    }
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, migrated);
   }
 
   async saveSettings() {

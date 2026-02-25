@@ -4,13 +4,54 @@
  * Registers the gus code block processor for displaying work items.
  */
 
-import { Notice, requestUrl } from 'obsidian';
+import { html, render } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import { App, Notice, requestUrl } from 'obsidian';
 import {
   getAuthenticatedClient,
   loginViaBrowser,
   queryWorkItems,
 } from './gus';
 import type { CachedToken, RequestFn, TokenStorage } from './gus';
+import { CreateUserStoryModal } from './create-user-story-modal';
+import { isLLMConfigured, type LLMPluginContext } from './llm';
+import type { LLMConfig } from './llm';
+
+const GUS_WORK_LOCATOR_URL =
+  'https://gus.my.salesforce.com/apex/ADM_WorkLocator?bugorworknumber=';
+
+/** Lifecycle order: lower = earlier. Used for sorting work items. */
+const STATUS_ORDER: Record<string, number> = {
+  New: 0,
+  Acknowledged: 0,
+  Triaged: 0,
+  'In Progress': 1,
+  Integrate: 1,
+  'Pending Release': 1,
+  'QA In Progress': 1,
+  Waiting: 2,
+  Investigating: 2,
+  'More Info Reqd from Support': 2,
+  'Ready for Review': 3,
+  Closed: 4,
+  Fixed: 4,
+  Duplicate: 4,
+  Completed: 4,
+  Rejected: 4,
+  Never: 4,
+  Inactive: 4,
+  'Not a bug': 4,
+  'Not Reproducible': 4,
+  Deferred: 4,
+};
+
+function statusSortOrder(status: string): number {
+  const s = status.trim();
+  if (s in STATUS_ORDER) return STATUS_ORDER[s];
+  if (s.startsWith('Waiting')) return 2;
+  if (s.startsWith('Closed')) return 4;
+  return 5; // unknown statuses last
+}
 
 /** Map GUS status to modifier class for styling. */
 function gusStatusModifier(status: string): string {
@@ -48,8 +89,8 @@ function gusStatusModifier(status: string): string {
 }
 
 /** Wrap plain URLs in anchor tags; avoids doubling URLs inside href attributes. */
-function autoLinkUrls(html: string): string {
-  return html.replace(
+function autoLinkUrls(htmlStr: string): string {
+  return htmlStr.replace(
     /(^|[\s>])(https?:\/\/[^\s<]+)/g,
     (_, before, url) =>
       `${before}<a href="${url}" target="_blank" rel="noopener" class="gus-link">${url}</a>`,
@@ -58,6 +99,14 @@ function autoLinkUrls(html: string): string {
 
 /** Plugin context required for GUS integration. */
 export interface GusPluginContext {
+  app: App;
+  settings: {
+    llmProvider?: string;
+    llmApiKey?: string;
+    llmBaseUrl?: string;
+    llmModel?: string;
+    llmModelUserStory?: string;
+  };
   loadData(): Promise<unknown>;
   saveData(data: unknown): Promise<void>;
   registerMarkdownCodeBlockProcessor(
@@ -66,31 +115,121 @@ export interface GusPluginContext {
   ): void;
 }
 
+type GusWorkItem = {
+  name: string;
+  subject: string;
+  status: string;
+  description?: string;
+};
+
+/**
+ * Insert a new work item ID into the gus block markdown in the active file.
+ */
+async function insertWorkItemIntoBlock(
+  app: App,
+  blockSource: string,
+  workItemName: string,
+): Promise<boolean> {
+  const file = app.workspace.getActiveFile();
+  if (!file) return false;
+  try {
+    const content = await app.vault.read(file);
+    const escapedBody =
+      blockSource === ''
+        ? '\\n?'
+        : blockSource
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\n/g, '\\n') + '\\n';
+    const pattern = new RegExp('```gus\\n' + escapedBody + '```', 'm');
+    if (!pattern.test(content)) return false;
+    const newBlockBody = blockSource.trimEnd()
+      ? `${blockSource.trimEnd()}\n${workItemName}`
+      : workItemName;
+    const newContent = content.replace(
+      new RegExp('```gus\\n' + escapedBody + '```', 'm'),
+      `\`\`\`gus\n${newBlockBody}\n\`\`\``,
+    );
+    await app.vault.modify(file, newContent);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Register GUS integration: code block processor for work items.
  */
 export function registerGusIntegration(plugin: GusPluginContext): void {
   plugin.registerMarkdownCodeBlockProcessor('gus', (source, el) => {
     const container = el.createDiv({ cls: 'gus-container' });
+    const btnRow = container.createDiv({ cls: 'gus-btn-row' });
+    const contentDiv = container.createDiv({ cls: 'gus-content' });
     const workItemIds = source
       .split(/\n/)
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (workItemIds.length === 0) {
-      container.createEl('p', {
-        text: 'Enter work item IDs (one per line, e.g. W-12345)',
-        cls: 'gus-usage',
-      });
-      return;
-    }
-
     const gusTokenStorage: TokenStorage = {
-      get: () => plugin.loadData().then((d) => (d as { gusToken?: CachedToken })?.gusToken ?? null),
+      get: () =>
+        plugin.loadData().then(
+          (d) => (d as { gusToken?: CachedToken })?.gusToken ?? null,
+        ),
       set: (data) =>
         plugin.loadData().then((d) =>
           plugin.saveData({ ...(d ?? {}), gusToken: data }),
         ),
+    };
+
+    const getLLMConfig = (): LLMConfig => ({
+      provider: (plugin.settings?.llmProvider ?? 'openrouter') as LLMConfig['provider'],
+      apiKey: plugin.settings?.llmApiKey ?? '',
+      baseUrl: plugin.settings?.llmBaseUrl?.trim() || undefined,
+      model:
+        plugin.settings?.llmModelUserStory?.trim() ||
+        plugin.settings?.llmModel?.trim() ||
+        undefined,
+    });
+
+    const llmCtx: LLMPluginContext = {
+      getConfig: getLLMConfig,
+      requestUrl: async (opts) => {
+        const res = await requestUrl({
+          url: opts.url,
+          method: opts.method ?? 'GET',
+          headers: opts.headers,
+          body: opts.body,
+          throw: false,
+        });
+        return {
+          status: res.status,
+          json: res.json,
+        };
+      },
+    };
+
+    const onCreateUserStoryClick = () => {
+      if (!isLLMConfigured(getLLMConfig())) {
+        new Notice('LLM is not configured. Add API key or base URL in plugin settings.');
+        return;
+      }
+      const modal = new CreateUserStoryModal(plugin.app, {
+        app: plugin.app,
+        llmCtx,
+        requestFn: gusRequestFn,
+        tokenStorage: gusTokenStorage,
+        openBrowser,
+        onSuccess: async (workItemName) => {
+          const inserted = await insertWorkItemIntoBlock(
+            plugin.app,
+            source,
+            workItemName,
+          );
+          if (inserted) {
+            new Notice(`Added ${workItemName} to block.`);
+          }
+        },
+      });
+      modal.open();
     };
 
     const openBrowser = (url: string) => {
@@ -121,114 +260,137 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
       };
     };
 
-    const renderLoading = () => {
-      container.empty();
-      container.createDiv({
-        cls: 'gus-loading',
-        text: 'Loading work items...',
-      });
-    };
+    const createBtn = btnRow.createEl('button', {
+      cls: 'gus-create-btn',
+      text: 'Create User Story',
+    });
+    createBtn.addEventListener('click', onCreateUserStoryClick);
 
-    const renderError = (message: string) => {
-      container.empty();
-      container.createEl('p', { text: message, cls: 'gus-error' });
-    };
-
-    const renderLoginNeeded = () => {
-      container.empty();
-      container.createEl('p', {
-        text: 'Login to GUS to view work items.',
-        cls: 'gus-login-prompt',
-      });
-      const btn = container.createEl('button', {
-        text: 'Login to GUS',
-        cls: 'gus-login-btn',
-      });
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        try {
-          const token = await loginViaBrowser({
-            openBrowser,
-            requestFn: gusRequestFn,
-          });
-          await gusTokenStorage.set({
-            accessToken: token.access_token,
-            instanceUrl: token.instance_url,
-            timeCollected: new Date().toISOString(),
-          });
-          new Notice('GUS login successful.');
-          doFetch();
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          new Notice(`GUS login failed: ${message}`);
-          renderError(message);
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    };
-
-    const GUS_WORK_LOCATOR_URL =
-      'https://gus.my.salesforce.com/apex/ADM_WorkLocator?bugorworknumber=';
-
-    const renderWorkItem = (
-      parent: HTMLElement,
-      item: {
-        name: string;
-        subject: string;
-        status: string;
-        description?: string;
-      },
-    ) => {
-      const itemEl = parent.createDiv({ cls: 'gus-work-item' });
-      itemEl.createEl('span', {
-        text: item.status,
-        cls: `gus-status ${gusStatusModifier(item.status)}`,
-      });
-      const header = itemEl.createDiv({ cls: 'gus-header' });
-      header.createEl('span', {
-        text: `${item.name}: ${item.subject}`,
-        cls: 'gus-title',
-      });
-      if (item.description) {
-        const toggle = header.createSpan({
-          cls: 'gus-description-toggle',
-          text: '[+]',
-        });
-        const descEl = itemEl.createDiv({ cls: 'gus-description' });
-        descEl.innerHTML = autoLinkUrls(item.description);
-        descEl.style.display = 'none';
-        toggle.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const isOpen = descEl.style.display === 'none';
-          descEl.style.display = isOpen ? 'block' : 'none';
-          toggle.setText(isOpen ? '[-]' : '[+]');
-        });
+    const onDescriptionToggle = (e: Event) => {
+      e.stopPropagation();
+      const target = e.target as HTMLElement;
+      const workItem = target.closest('.gus-work-item');
+      const descEl = workItem?.querySelector<HTMLElement>('.gus-description');
+      if (descEl) {
+        const isOpen = descEl.style.display === 'none';
+        descEl.style.display = isOpen ? 'block' : 'none';
+        target.textContent = isOpen ? '[-]' : '[+]';
       }
-      const link = header.createEl('a', {
-        href: `${GUS_WORK_LOCATOR_URL}${encodeURIComponent(item.name)}`,
-        cls: 'gus-external-link',
-        title: 'Open in GUS',
-      });
-      link.setText('↗');
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        const url = `${GUS_WORK_LOCATOR_URL}${encodeURIComponent(item.name)}`;
-        if (typeof require !== 'undefined') {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            require('electron').shell.openExternal(url);
-          } catch {
-            window.open(url);
-          }
-        } else {
-          window.open(url);
-        }
-      });
     };
+
+    const onLinkClick = (itemName: string) => (e: Event) => {
+      e.preventDefault();
+      const url = `${GUS_WORK_LOCATOR_URL}${encodeURIComponent(itemName)}`;
+      openBrowser(url);
+    };
+
+    const renderView = (
+      view:
+        | { type: 'loading' }
+        | { type: 'error'; message: string }
+        | { type: 'login' }
+        | { type: 'workItems'; items: GusWorkItem[]; missing: string[] },
+    ) => {
+      if (view.type === 'loading') {
+        render(
+          html`<div class="gus-loading">Loading work items...</div>`,
+          contentDiv,
+        );
+        return;
+      }
+      if (view.type === 'error') {
+        render(
+          html`<p class="gus-error">${view.message}</p>`,
+          contentDiv,
+        );
+        return;
+      }
+      if (view.type === 'login') {
+        const onLoginClick = async () => {
+          renderView({ type: 'loading' });
+          try {
+            const token = await loginViaBrowser({
+              openBrowser,
+              requestFn: gusRequestFn,
+            });
+            await gusTokenStorage.set({
+              accessToken: token.access_token,
+              instanceUrl: token.instance_url,
+              timeCollected: new Date().toISOString(),
+            });
+            new Notice('GUS login successful.');
+            doFetch();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            new Notice(`GUS login failed: ${message}`);
+            renderView({ type: 'error', message });
+          }
+        };
+        render(
+          html`
+            <p class="gus-login-prompt">Login to GUS to view work items.</p>
+            <button class="gus-login-btn" @click=${onLoginClick}>
+              Login to GUS
+            </button>
+          `,
+          contentDiv,
+        );
+        return;
+      }
+      // view.type === 'workItems'
+      const { items, missing } = view;
+        render(
+          html`
+          ${missing.length > 0
+            ? html`<p class="gus-error">Work items not found: ${missing.join(', ')}</p>`
+            : ''}
+          ${items.map(
+            (item) => html`
+              <div class="gus-work-item">
+                <span class="gus-status ${gusStatusModifier(item.status)}"
+                  >${item.status}</span
+                >
+                <div class="gus-header">
+                  <span class="gus-title">${item.name}: ${item.subject}
+                  ${item.description
+                    ? html`<span
+                        class="gus-description-toggle"
+                        @click=${onDescriptionToggle}
+                        >[+]</span
+                      >`
+                    : ''}
+                  <a
+                    class="gus-external-link"
+                    href="${GUS_WORK_LOCATOR_URL}${encodeURIComponent(item.name)}"
+                    title="Open in GUS"
+                    @click=${onLinkClick(item.name)}
+                    >↗</a
+                  >
+                    </span>
+                </div>
+                ${item.description
+                  ? html`<div class="gus-description" style="display:none">
+                      ${unsafeHTML(autoLinkUrls(item.description))}
+                    </div>`
+                  : ''}
+              </div>
+            `,
+          )}
+        `,
+        contentDiv,
+      );
+    };
+
+    if (workItemIds.length === 0) {
+      render(
+        html`<p class="gus-usage">Enter work item IDs (one per line, e.g. W-12345)</p>`,
+        contentDiv,
+      );
+      return;
+    }
 
     const doFetch = async () => {
-      renderLoading();
+      renderView({ type: 'loading' });
       const cached = await gusTokenStorage.get();
       const maxAgeMs = 8 * 60 * 60 * 1000;
       const isValid =
@@ -236,7 +398,7 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
         Date.now() - new Date(cached.timeCollected).getTime() < maxAgeMs;
 
       if (!isValid) {
-        renderLoginNeeded();
+        renderView({ type: 'login' });
         return;
       }
 
@@ -256,32 +418,31 @@ export function registerGusIntegration(plugin: GusPluginContext): void {
           gusRequestFn,
         );
         items.sort((a, b) => {
+          const orderA = statusSortOrder(a.status);
+          const orderB = statusSortOrder(b.status);
+          if (orderA !== orderB) return orderA - orderB;
           const ia = workItemIds.indexOf(a.name);
           const ib = workItemIds.indexOf(b.name);
           return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
         });
         if (items.length === 0) {
-          renderError(
-            `Work items not found: ${workItemIds.join(', ')}`,
-          );
+          renderView({
+            type: 'error',
+            message: `Work items not found: ${workItemIds.join(', ')}`,
+          });
         } else {
           const missing = workItemIds.filter(
             (id) => !items.some((it) => it.name === id),
           );
-          container.empty();
-          if (missing.length > 0) {
-            container.createEl('p', {
-              text: `Work items not found: ${missing.join(', ')}`,
-              cls: 'gus-error',
-            });
-          }
-          for (const item of items) {
-            renderWorkItem(container, item);
-          }
+          renderView({
+            type: 'workItems',
+            items,
+            missing,
+          });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        renderError(message);
+        renderView({ type: 'error', message });
         console.error('GUS fetch failed:', err);
       }
     };

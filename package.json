@@ -1,21 +1,27 @@
 {
-  "name": "obsidian-plugin",
+  "name": "sf-work-tracking",
   "version": "0.1.0",
-  "description": "An Obsidian plugin",
+  "description": "SF Work Tracking - OmniFocus and GUS integrations for Obsidian",
   "main": "main.js",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "dev": "node esbuild.config.mjs",
-    "dev:watch": "nodemon --watch src --watch main.ts --watch styles.css --watch manifest.json --watch esbuild.config.mjs --watch scripts --ext ts,css,json,mjs --ignore test-vault --ignore node_modules --exec \"npm run build && npm run generate-vault\"",
+    "dev:watch": "nodemon --watch src --watch main.ts --watch styles.css --watch manifest.json --watch esbuild.config.mjs --watch scripts --ext ts,css,json,mjs --ignore test-vault --ignore node_modules --exec \"pnpm run build && pnpm run generate-vault\"",
     "build": "tsc --noEmit && node esbuild.config.mjs --production",
     "test": "jest",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "generate-vault": "node scripts/generate-test-vault.mjs",
-    "launch": "npm run build && npm run generate-vault && node scripts/launch-obsidian.mjs"
+    "launch": "pnpm run build && pnpm run generate-vault && node scripts/launch-obsidian.mjs",
+    "install-to-vault": "bash scripts/install-to-vault.sh"
   },
   "keywords": [
     "obsidian",
-    "obsidian-plugin"
+    "obsidian-plugin",
+    "omnifocus",
+    "gus",
+    "salesforce"
   ],
   "author": "",
   "license": "MIT",
@@ -33,5 +39,7 @@
     "ts-jest": "^29.1.2",
     "typescript": "^5.3.3"
   },
-  "dependencies": {}
+  "dependencies": {
+    "lit": "^3.1.0"
+  }
 }

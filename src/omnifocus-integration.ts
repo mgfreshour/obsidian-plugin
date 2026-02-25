@@ -5,6 +5,7 @@
  * and auto-sync interval.
  */
 
+import { html, render } from 'lit';
 import { Notice, TFile } from 'obsidian';
 import type { App } from 'obsidian';
 import type { PluginSettings } from './settings';
@@ -63,6 +64,15 @@ async function syncInbox(plugin: OmnifocusPluginContext): Promise<void> {
   }
 }
 
+type OmnifocusBlockState = {
+  status: 'loading' | 'ready';
+  label: string;
+  config: { source: TaskSource; showCompleted: boolean };
+  syncing: boolean;
+  tasks?: OmniFocusTask[];
+  error?: string;
+};
+
 /**
  * Register OmniFocus integration: command, ribbon icon, sync interval, and code block processor.
  */
@@ -91,146 +101,210 @@ export function registerOmniFocusIntegration(plugin: OmnifocusPluginContext): vo
       config = parseBlockConfig(source);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      container.createEl('p', {
-        text: message,
-        cls: 'omnifocus-error',
-      });
+      render(
+        html`<p class="omnifocus-error">${message}</p>`,
+        container,
+      );
       return;
     }
 
     if (config === null) {
-      const usage = container.createDiv({ cls: 'omnifocus-usage' });
-      usage.createEl('p', { text: 'OmniFocus — specify a source:' });
-      const list = usage.createEl('ul');
-      list.createEl('li', { text: 'inbox' });
-      list.createEl('li', { text: 'project: <name>' });
-      list.createEl('li', { text: 'tag: <name>' });
-      usage.createEl('p', {
-        text: 'Add "showCompleted" on a second line to include completed tasks.',
-      });
+      render(
+        html`
+          <div class="omnifocus-usage">
+            <p>OmniFocus — specify a source:</p>
+            <ul>
+              <li>inbox</li>
+              <li>project: &lt;name&gt;</li>
+              <li>tag: &lt;name&gt;</li>
+            </ul>
+            <p>Add "showCompleted" on a second line to include completed tasks.</p>
+          </div>
+        `,
+        container,
+      );
       return;
     }
 
     const taskSource = config.source;
     const label = sourceLabel(taskSource);
 
-    const btnRow = container.createDiv({ cls: 'omnifocus-btn-row' });
-    const addBtn = btnRow.createEl('button', {
-      text: 'Add task',
-      cls: 'omnifocus-add-btn',
-    });
-    const btn = btnRow.createEl('button', {
-      text: `Sync OmniFocus ${label}`,
-      cls: 'omnifocus-sync-btn',
-    });
+    let state: OmnifocusBlockState = {
+      status: 'loading',
+      label,
+      config,
+      syncing: false,
+    };
 
-    const listWrapper = container.createDiv({ cls: 'omnifocus-list-wrapper' });
-    let listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
-
-    const renderTasks = (tasks: OmniFocusTask[]) => {
-      listWrapper.empty();
-      listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
-      if (tasks.length === 0) {
-        const empty = listWrapper.createEl('p', {
-          text: `No tasks in ${label}.`,
-          cls: 'omnifocus-empty',
-        });
-        listEl.replaceWith(empty);
-      } else {
-        const sorted = [...tasks].sort(
-          (a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0),
-        );
-        for (const task of sorted) {
-          const li = listEl.createEl('li', {
-            cls: task.completed ? 'omnifocus-task-item omnifocus-task-item--completed' : 'omnifocus-task-item',
-          });
-          if (task.completed) {
-            const marker = li.createSpan({
-              cls: 'omnifocus-task-completed-marker',
-              text: '☑',
-            });
-            marker.title = 'Completed';
-          } else {
-            const checkbox = li.createEl('input', {
-              cls: 'omnifocus-task-checkbox',
-            });
-            checkbox.type = 'checkbox';
-            checkbox.title = 'Mark complete';
-            checkbox.addEventListener('change', async () => {
-              checkbox.disabled = true;
-              try {
-                await completeTask(task.id);
-                new Notice('Task completed.');
-                doFetch();
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                console.error('OmniFocus complete task failed:', err);
-                new Notice(`OmniFocus error: ${message}`);
-                checkbox.checked = false;
-                checkbox.disabled = false;
-              }
-            });
-          }
-          li.createSpan({ text: task.name, cls: 'omnifocus-task-name' });
-          if (task.note) {
-            const toggle = li.createSpan({
-              cls: 'omnifocus-task-note-toggle',
-              text: '[+]',
-            });
-            const noteEl = li.createDiv({ cls: 'omnifocus-task-note' });
-            noteEl.setText(task.note);
-            noteEl.style.display = 'none';
-            toggle.addEventListener('click', (e) => {
-              e.stopPropagation();
-              const isOpen = noteEl.style.display === 'none';
-              noteEl.style.display = isOpen ? 'block' : 'none';
-              toggle.setText(isOpen ? '[-]' : '[+]');
-            });
-          }
-          const link = li.createEl('a', {
-            href: `omnifocus:///task/${task.id}`,
-            cls: 'omnifocus-task-link',
-            title: 'Open in OmniFocus',
-          });
-          link.setText('↗');
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            require('electron').shell.openExternal(`omnifocus:///task/${task.id}`);
-          });
-        }
+    const onNoteToggle = (e: Event) => {
+      e.stopPropagation();
+      const target = e.target as HTMLElement;
+      const li = target.closest('.omnifocus-task-item');
+      const noteEl = li?.querySelector<HTMLElement>('.omnifocus-task-note');
+      if (noteEl) {
+        const isOpen = noteEl.style.display === 'none';
+        noteEl.style.display = isOpen ? 'block' : 'none';
+        target.textContent = isOpen ? '[-]' : '[+]';
       }
     };
 
+    const onOmniFocusLinkClick = (taskId: string) => (e: Event) => {
+      e.preventDefault();
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires -- electron is provided at runtime by Obsidian
+        require('electron').shell.openExternal(`omnifocus:///task/${taskId}`);
+      } catch {
+        window.open(`omnifocus:///task/${taskId}`);
+      }
+    };
+
+    const renderBlock = () => {
+      const s = state;
+      const syncing = s.syncing;
+      const btnLabel = syncing ? 'Syncing...' : `Sync OmniFocus ${s.label}`;
+
+      const onSyncClick = () => {
+        doFetch();
+      };
+
+      const onAddClick = () => {
+        new AddTaskModal(plugin.app, taskSource, async (title, note) => {
+          await createTask(taskSource, title, note);
+          new Notice(`Created task in ${s.label}.`);
+          doFetch();
+        }).open();
+      };
+
+      const onCheckboxChange = (task: OmniFocusTask) => async (e: Event) => {
+        const checkbox = e.target as HTMLInputElement;
+        checkbox.disabled = true;
+        try {
+          await completeTask(task.id);
+          new Notice('Task completed.');
+          doFetch();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('OmniFocus complete task failed:', err);
+          new Notice(`OmniFocus error: ${message}`);
+          checkbox.checked = false;
+          checkbox.disabled = false;
+        }
+      };
+
+      const tasks = s.tasks ?? [];
+      const sorted =
+        tasks.length > 0
+          ? [...tasks].sort(
+              (a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0),
+            )
+          : [];
+
+      render(
+        html`
+          <div class="omnifocus-btn-row">
+            <button class="omnifocus-add-btn" ?disabled=${syncing} @click=${onAddClick}>
+              Add task
+            </button>
+            <button
+              class="omnifocus-sync-btn"
+              ?disabled=${syncing}
+              @click=${onSyncClick}
+            >
+              ${btnLabel}
+            </button>
+          </div>
+          <div class="omnifocus-list-wrapper">
+            ${s.error
+              ? html`<ul class="omnifocus-task-list">
+                  <li class="omnifocus-error">${s.error}</li>
+                </ul>`
+              : sorted.length === 0
+                ? html`<p class="omnifocus-empty">No tasks in ${s.label}.</p>`
+                : html`<ul class="omnifocus-task-list">
+                    ${sorted.map(
+                      (task) => html`
+                        <li
+                          class=${task.completed
+                            ? 'omnifocus-task-item omnifocus-task-item--completed'
+                            : 'omnifocus-task-item'}
+                        >
+                          ${task.completed
+                            ? html`<span
+                                class="omnifocus-task-completed-marker"
+                                title="Completed"
+                                >☑</span
+                              >`
+                            : html`<input
+                                type="checkbox"
+                                class="omnifocus-task-checkbox"
+                                title="Mark complete"
+                                @change=${onCheckboxChange(task)}
+                              />`}
+                          <span class="omnifocus-task-name">${task.name}</span>
+                          ${task.note
+                            ? html`
+                                <span
+                                  class="omnifocus-task-note-toggle"
+                                  @click=${onNoteToggle}
+                                  >[+]</span
+                                >
+                                <div
+                                  class="omnifocus-task-note"
+                                  style="display:none"
+                                  >${task.note}</div
+                                >
+                              `
+                            : ''}
+                          <a
+                            class="omnifocus-task-link"
+                            href="omnifocus:///task/${task.id}"
+                            title="Open in OmniFocus"
+                            @click=${onOmniFocusLinkClick(task.id)}
+                            >↗</a
+                          >
+                        </li>
+                      `,
+                    )}
+                  </ul>`}
+          </div>
+        `,
+        container,
+      );
+    };
+
     const doFetch = async () => {
-      btn.disabled = true;
-      btn.setText('Syncing...');
+      state = {
+        status: 'loading',
+        label,
+        config,
+        syncing: true,
+      };
+      renderBlock();
+
       try {
         const tasks = await fetchTasks(taskSource, {
           includeCompleted: config.showCompleted,
         });
-        renderTasks(tasks);
+        state = {
+          status: 'ready',
+          label,
+          config,
+          syncing: false,
+          tasks,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        listWrapper.empty();
-        listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
-        listEl.createEl('li', { text: `Error: ${message}`, cls: 'omnifocus-error' });
-      } finally {
-        btn.disabled = false;
-        btn.setText(`Sync OmniFocus ${label}`);
+        state = {
+          status: 'ready',
+          label,
+          config,
+          syncing: false,
+          error: message,
+        };
       }
+      renderBlock();
     };
 
-    btn.addEventListener('click', doFetch);
-
-    addBtn.addEventListener('click', () => {
-      new AddTaskModal(plugin.app, taskSource, async (title, note) => {
-        await createTask(taskSource, title, note);
-        new Notice(`Created task in ${label}.`);
-        doFetch();
-      }).open();
-    });
-
-    // Auto-fetch on render
     doFetch();
   });
 }
