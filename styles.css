@@ -91,11 +91,29 @@
   margin-right: 4px;
 }
 
+.omnifocus-task-completed-marker {
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
 .omnifocus-task-item .omnifocus-task-name {
   flex: 1;
   min-width: 0;
   font-size: 14px;
   line-height: 1.45;
+}
+
+.omnifocus-task-item--completed .omnifocus-task-name {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.omnifocus-task-item--completed:hover .omnifocus-task-name {
+  text-decoration: none;
+  color: var(--text-normal);
 }
 
 .omnifocus-task-link {
@@ -187,4 +205,109 @@
 .omnifocus-add-task-modal .setting-item-control textarea {
   resize: vertical;
   min-height: 80px;
+}
+
+/* GUS work item block */
+
+.gus-container {
+  padding: 16px 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  margin: 12px 0;
+  background: var(--background-secondary);
+}
+
+.gus-loading {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.gus-error {
+  white-space: pre-line;
+  font-size: 13px;
+  color: var(--text-error);
+}
+
+.gus-usage {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.gus-login-prompt {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.gus-login-btn {
+  cursor: pointer;
+  padding: 8px 18px;
+  border-radius: 6px;
+  border: none;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+
+.gus-login-btn:hover {
+  opacity: 0.9;
+}
+
+.gus-login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gus-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gus-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.gus-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.gus-description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-normal);
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.gus-description p,
+.gus-description ul,
+.gus-description ol {
+  margin: 0.5em 0;
+}
+
+.gus-description p:first-child,
+.gus-description ul:first-child,
+.gus-description ol:first-child {
+  margin-top: 0;
+}
+
+.gus-description .gus-link {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.gus-description .gus-link:hover {
+  text-decoration: underline;
 }

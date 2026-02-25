@@ -1,9 +1,24 @@
-import { Notice, Plugin, TFile } from 'obsidian';
+import { Notice, Plugin, TFile, requestUrl } from 'obsidian';
+
+/** Wrap plain URLs in anchor tags; avoids doubling URLs inside href attributes. */
+function autoLinkUrls(html: string): string {
+  return html.replace(
+    /(^|[\s>])(https?:\/\/[^\s<]+)/g,
+    (_, before, url) =>
+      `${before}<a href="${url}" target="_blank" rel="noopener" class="gus-link">${url}</a>`,
+  );
+}
 import { DEFAULT_SETTINGS, SettingsTab } from './src/settings';
 import type { PluginSettings } from './src/settings';
-import { completeTask, createTask, fetchTasks, parseSource, sourceLabel } from './src/omnifocus';
+import { completeTask, createTask, fetchTasks, parseBlockConfig, sourceLabel } from './src/omnifocus';
 import type { OmniFocusTask, TaskSource } from './src/omnifocus';
 import { AddTaskModal } from './src/add-task-modal';
+import {
+  getAuthenticatedClient,
+  loginViaBrowser,
+  queryWorkItems,
+} from './src/gus';
+import type { RequestFn, TokenStorage } from './src/gus';
 
 const INBOX_FILE = 'Sample Note.md';
 
@@ -35,9 +50,9 @@ export default class ObsidianPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor('omnifocus', (source, el) => {
       const container = el.createDiv({ cls: 'omnifocus-container' });
 
-      let taskSource: TaskSource | null;
+      let config: { source: TaskSource; showCompleted: boolean } | null;
       try {
-        taskSource = parseSource(source);
+        config = parseBlockConfig(source);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         container.createEl('p', {
@@ -47,16 +62,20 @@ export default class ObsidianPlugin extends Plugin {
         return;
       }
 
-      if (taskSource === null) {
+      if (config === null) {
         const usage = container.createDiv({ cls: 'omnifocus-usage' });
         usage.createEl('p', { text: 'OmniFocus — specify a source:' });
         const list = usage.createEl('ul');
         list.createEl('li', { text: 'inbox' });
         list.createEl('li', { text: 'project: <name>' });
         list.createEl('li', { text: 'tag: <name>' });
+        usage.createEl('p', {
+          text: 'Add "showCompleted" on a second line to include completed tasks.',
+        });
         return;
       }
 
+      const taskSource = config.source;
       const label = sourceLabel(taskSource);
 
       const btnRow = container.createDiv({ cls: 'omnifocus-btn-row' });
@@ -82,25 +101,40 @@ export default class ObsidianPlugin extends Plugin {
           });
           listEl.replaceWith(empty);
         } else {
-          for (const task of tasks) {
-            const li = listEl.createEl('li', { cls: 'omnifocus-task-item' });
-            const checkbox = li.createEl('input', { cls: 'omnifocus-task-checkbox' });
-            checkbox.type = 'checkbox';
-            checkbox.title = 'Mark complete';
-            checkbox.addEventListener('change', async () => {
-              checkbox.disabled = true;
-              try {
-                await completeTask(task.id);
-                new Notice('Task completed.');
-                doFetch();
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                console.error('OmniFocus complete task failed:', err);
-                new Notice(`OmniFocus error: ${message}`);
-                checkbox.checked = false;
-                checkbox.disabled = false;
-              }
+          const sorted = [...tasks].sort(
+            (a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0),
+          );
+          for (const task of sorted) {
+            const li = listEl.createEl('li', {
+              cls: task.completed ? 'omnifocus-task-item omnifocus-task-item--completed' : 'omnifocus-task-item',
             });
+            if (task.completed) {
+              const marker = li.createSpan({
+                cls: 'omnifocus-task-completed-marker',
+                text: '☑',
+              });
+              marker.title = 'Completed';
+            } else {
+              const checkbox = li.createEl('input', {
+                cls: 'omnifocus-task-checkbox',
+              });
+              checkbox.type = 'checkbox';
+              checkbox.title = 'Mark complete';
+              checkbox.addEventListener('change', async () => {
+                checkbox.disabled = true;
+                try {
+                  await completeTask(task.id);
+                  new Notice('Task completed.');
+                  doFetch();
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  console.error('OmniFocus complete task failed:', err);
+                  new Notice(`OmniFocus error: ${message}`);
+                  checkbox.checked = false;
+                  checkbox.disabled = false;
+                }
+              });
+            }
             li.createSpan({ text: task.name, cls: 'omnifocus-task-name' });
             if (task.note) {
               const toggle = li.createSpan({
@@ -135,7 +169,9 @@ export default class ObsidianPlugin extends Plugin {
         btn.disabled = true;
         btn.setText('Syncing...');
         try {
-          const tasks = await fetchTasks(taskSource);
+          const tasks = await fetchTasks(taskSource, {
+            includeCompleted: config.showCompleted,
+          });
           renderTasks(tasks);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -159,6 +195,163 @@ export default class ObsidianPlugin extends Plugin {
       });
 
       // Auto-fetch on render
+      doFetch();
+    });
+
+    // GUS work item code block
+    this.registerMarkdownCodeBlockProcessor('gus', (source, el) => {
+      const container = el.createDiv({ cls: 'gus-container' });
+      const workItemId = source.trim();
+
+      if (!workItemId) {
+        container.createEl('p', {
+          text: 'Enter a work item ID (e.g. W-12345)',
+          cls: 'gus-usage',
+        });
+        return;
+      }
+
+      const gusTokenStorage: TokenStorage = {
+        get: () => this.loadData().then((d) => d?.gusToken ?? null),
+        set: (data) =>
+          this.loadData().then((d) =>
+            this.saveData({ ...(d ?? {}), gusToken: data }),
+          ),
+      };
+
+      const openBrowser = (url: string) => {
+        if (typeof require !== 'undefined') {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            require('electron').shell.openExternal(url);
+          } catch {
+            window.open(url);
+          }
+        } else {
+          window.open(url);
+        }
+      };
+
+      const gusRequestFn: RequestFn = async (url, options) => {
+        const res = await requestUrl({
+          url,
+          method: options?.method ?? 'GET',
+          headers: options?.headers,
+          body: options?.body,
+          throw: false,
+        });
+        return {
+          ok: res.status >= 200 && res.status < 300,
+          status: res.status,
+          json: () => Promise.resolve(res.json),
+        };
+      };
+
+      const renderLoading = () => {
+        container.empty();
+        container.createDiv({ cls: 'gus-loading', text: 'Loading work item...' });
+      };
+
+      const renderError = (message: string) => {
+        container.empty();
+        container.createEl('p', { text: message, cls: 'gus-error' });
+      };
+
+      const renderLoginNeeded = () => {
+        container.empty();
+        container.createEl('p', {
+          text: 'Login to GUS to view work items.',
+          cls: 'gus-login-prompt',
+        });
+        const btn = container.createEl('button', {
+          text: 'Login to GUS',
+          cls: 'gus-login-btn',
+        });
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const token = await loginViaBrowser({
+              openBrowser,
+              requestFn: gusRequestFn,
+            });
+            await gusTokenStorage.set({
+              accessToken: token.access_token,
+              instanceUrl: token.instance_url,
+              timeCollected: new Date().toISOString(),
+            });
+            new Notice('GUS login successful.');
+            doFetch();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            new Notice(`GUS login failed: ${message}`);
+            renderError(message);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      };
+
+      const renderWorkItem = (item: {
+        name: string;
+        subject: string;
+        status: string;
+        description?: string;
+      }) => {
+        container.empty();
+        const header = container.createDiv({ cls: 'gus-header' });
+        header.createEl('span', {
+          text: `${item.name}: ${item.subject}`,
+          cls: 'gus-title',
+        });
+        header.createEl('span', {
+          text: item.status,
+          cls: 'gus-status',
+        });
+        if (item.description) {
+          const descEl = container.createDiv({ cls: 'gus-description' });
+          descEl.innerHTML = autoLinkUrls(item.description);
+        }
+      };
+
+      const doFetch = async () => {
+        renderLoading();
+        const cached = await gusTokenStorage.get();
+        const maxAgeMs = 8 * 60 * 60 * 1000;
+        const isValid =
+          cached &&
+          Date.now() - new Date(cached.timeCollected).getTime() < maxAgeMs;
+
+        if (!isValid) {
+          renderLoginNeeded();
+          return;
+        }
+
+        try {
+          const { accessToken, instanceUrl } = await getAuthenticatedClient({
+            tokenStorage: gusTokenStorage,
+            openBrowser,
+            requestFn: gusRequestFn,
+          });
+          const escapedId = workItemId.replace(/'/g, "''");
+          const soql = `SELECT Id, Name, Subject__c, Status__c, Details__c FROM ADM_Work__c WHERE Name = '${escapedId}'`;
+          const items = await queryWorkItems(
+            accessToken,
+            instanceUrl,
+            soql,
+            gusRequestFn,
+          );
+          if (items.length === 0) {
+            renderError(`Work item not found: ${workItemId}`);
+          } else {
+            renderWorkItem(items[0]);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          renderError(message);
+          console.error('GUS fetch failed:', err);
+        }
+      };
+
       doFetch();
     });
   }

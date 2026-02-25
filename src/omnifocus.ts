@@ -12,6 +12,14 @@ export interface OmniFocusTask {
   name: string;
   id: string;
   note: string;
+  /** True when task is completed; only present when includeCompleted was used. */
+  completed?: boolean;
+}
+
+/** Parsed block configuration (source + options). */
+export interface BlockConfig {
+  source: TaskSource;
+  showCompleted: boolean;
 }
 
 /** Discriminated union describing where to fetch tasks from. */
@@ -66,6 +74,32 @@ export function parseSource(input: string): TaskSource | null {
     '  project: <name>  — fetch tasks from a project\n' +
     '  tag: <name>      — fetch tasks with a tag',
   );
+}
+
+/**
+ * Parse a code-block body into a {@link BlockConfig}.
+ *
+ * First line is the source (inbox, project: X, tag: X). Subsequent lines may
+ * include "showCompleted" or "show-completed" (case-insensitive) to include
+ * completed tasks.
+ *
+ * @returns A `BlockConfig`, or `null` if the input is empty.
+ * @throws If the first line doesn't match any known source format.
+ */
+export function parseBlockConfig(input: string): BlockConfig | null {
+  const lines = input
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+  const source = parseSource(lines[0]);
+  if (source === null) {
+    return null;
+  }
+  const showCompleted = lines.slice(1).some((l) => /^show-?completed$/i.test(l));
+  return { source, showCompleted };
 }
 
 /**
@@ -202,7 +236,7 @@ interface ScriptCommand {
 
 const FIELD_SEP = '\x1f'; // ASCII Unit Separator
 
-/** Parse delimited task output (name<sep>id<sep>note per line). */
+/** Parse delimited task output (name<sep>id<sep>note[<sep>completed] per line). */
 export function parseTaskOutput(stdout: string): OmniFocusTask[] {
   const trimmed = stdout.trim();
   if (trimmed.length === 0) {
@@ -217,6 +251,7 @@ export function parseTaskOutput(stdout: string): OmniFocusTask[] {
         name: parts[0] ?? '',
         id: parts[1] ?? '',
         note: (parts[2] ?? '').replace(/\\n/g, '\n'),
+        completed: parts.length >= 4 ? parts[3] === 'true' : false,
       });
     }
   }
@@ -224,8 +259,34 @@ export function parseTaskOutput(stdout: string): OmniFocusTask[] {
 }
 
 /** Build the AppleScript and osascript arguments for a given task source. */
-function buildScript(source: TaskSource): ScriptCommand {
-  const taskLoop = `
+function buildScript(
+  source: TaskSource,
+  includeCompleted: boolean,
+): ScriptCommand {
+  const taskLoop = includeCompleted
+    ? `
+    set output to ""
+    set sep to character id 31
+    set lf to character id 10
+    repeat with i from 1 to count of taskList
+      set t to item i of taskList
+      set taskName to name of t
+      set taskId to id of t
+      set noteText to note of t
+      if noteText is missing value then set noteText to ""
+      set taskCompleted to completed of t
+      set oldTID to AppleScript's text item delimiters
+      set AppleScript's text item delimiters to lf
+      set noteParts to text items of noteText
+      set AppleScript's text item delimiters to "\\\\n"
+      set noteSafe to noteParts as text
+      set AppleScript's text item delimiters to oldTID
+      if i > 1 then set output to output & linefeed
+      set output to output & taskName & sep & taskId & sep & noteSafe & sep & taskCompleted
+    end repeat
+    return output
+`
+    : `
     set output to ""
     set sep to character id 31
     set lf to character id 10
@@ -246,14 +307,23 @@ function buildScript(source: TaskSource): ScriptCommand {
     end repeat
     return output
 `;
+  const inboxFilter = includeCompleted ? 'every inbox task' : 'every inbox task whose completed is false';
+  const projectFilter = includeCompleted
+    ? 'every flattened task of proj'
+    : 'every flattened task of proj whose completed is false';
+  const tagFilter = includeCompleted
+    ? 'every flattened task whose (name of every tag contains tagName)'
+    : 'every flattened task whose (name of every tag contains tagName) and completed is false';
   switch (source.kind) {
     case 'inbox':
       return {
         script: `
 tell application "OmniFocus"
   tell default document
-    set taskList to every inbox task whose completed is false
-` + taskLoop + `
+    set taskList to ` +
+          inboxFilter +
+          taskLoop +
+          `
   end tell
 end tell
 `,
@@ -267,8 +337,10 @@ on run argv
   tell application "OmniFocus"
     tell default document
       set proj to first flattened project whose name is projectName
-      set taskList to every flattened task of proj whose completed is false
-` + taskLoop + `
+      set taskList to ` +
+          projectFilter +
+          taskLoop +
+          `
     end tell
   end tell
 end run
@@ -282,8 +354,10 @@ on run argv
   set tagName to item 1 of argv
   tell application "OmniFocus"
     tell default document
-      set taskList to every flattened task whose (name of every tag contains tagName) and completed is false
-` + taskLoop + `
+      set taskList to ` +
+          tagFilter +
+          taskLoop +
+          `
     end tell
   end tell
 end run
@@ -308,10 +382,15 @@ export function sourceLabel(source: TaskSource): string {
 /**
  * Fetch tasks from OmniFocus 4 for the given source.
  *
+ * @param source - Where to fetch tasks from.
+ * @param options - Optional. Set includeCompleted to true to fetch completed tasks too.
  * @returns Array of tasks with name, id, and note (empty if there are no tasks).
  * @throws If `osascript` fails (OmniFocus not installed, not running, etc.).
  */
-export async function fetchTasks(source: TaskSource): Promise<OmniFocusTask[]> {
+export async function fetchTasks(
+  source: TaskSource,
+  options?: { includeCompleted?: boolean },
+): Promise<OmniFocusTask[]> {
   if (source.kind === 'project') {
     const projects = await fetchProjectNames();
     const resolved = resolveName(source.name, projects, 'project');
@@ -324,7 +403,8 @@ export async function fetchTasks(source: TaskSource): Promise<OmniFocusTask[]> {
     source = { kind: 'tag', name: resolved };
   }
 
-  const { script, args } = buildScript(source);
+  const includeCompleted = options?.includeCompleted ?? false;
+  const { script, args } = buildScript(source, includeCompleted);
   return new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script, ...args], (error, stdout, stderr) => {
       if (error) {

@@ -1,4 +1,5 @@
 import {
+  parseBlockConfig,
   parseSource,
   parseTaskOutput,
   resolveName,
@@ -78,6 +79,66 @@ describe('parseSource', () => {
       expect(msg).toContain('project: <name>');
       expect(msg).toContain('tag: <name>');
     }
+  });
+});
+
+describe('parseBlockConfig', () => {
+  it('returns null for empty string', () => {
+    expect(parseBlockConfig('')).toBeNull();
+  });
+
+  it('returns null for whitespace-only string', () => {
+    expect(parseBlockConfig('   \n   ')).toBeNull();
+  });
+
+  it('parses single-line inbox with showCompleted false', () => {
+    expect(parseBlockConfig('inbox')).toEqual({
+      source: { kind: 'inbox' },
+      showCompleted: false,
+    });
+  });
+
+  it('parses single-line project', () => {
+    expect(parseBlockConfig('project: Foo')).toEqual({
+      source: { kind: 'project', name: 'Foo' },
+      showCompleted: false,
+    });
+  });
+
+  it('parses single-line tag', () => {
+    expect(parseBlockConfig('tag: @Work')).toEqual({
+      source: { kind: 'tag', name: '@Work' },
+      showCompleted: false,
+    });
+  });
+
+  it('parses multi-line with showCompleted', () => {
+    expect(parseBlockConfig('inbox\nshowCompleted')).toEqual({
+      source: { kind: 'inbox' },
+      showCompleted: true,
+    });
+  });
+
+  it('parses multi-line with show-completed', () => {
+    expect(parseBlockConfig('project: Bar\nshow-completed')).toEqual({
+      source: { kind: 'project', name: 'Bar' },
+      showCompleted: true,
+    });
+  });
+
+  it('parses showCompleted case-insensitively', () => {
+    expect(parseBlockConfig('inbox\nSHOWCOMPLETED')).toEqual({
+      source: { kind: 'inbox' },
+      showCompleted: true,
+    });
+  });
+
+  it('throws for invalid source on first line', () => {
+    expect(() => parseBlockConfig('nonsense')).toThrow('Unknown source');
+  });
+
+  it('throws for showCompleted alone without valid source', () => {
+    expect(() => parseBlockConfig('showCompleted')).toThrow('Unknown source');
   });
 });
 
@@ -174,27 +235,41 @@ describe('parseTaskOutput', () => {
 
   it('parses single task with name, id, and empty note', () => {
     expect(parseTaskOutput('Buy milk\x1foF123\x1f')).toEqual([
-      { name: 'Buy milk', id: 'oF123', note: '' },
+      { name: 'Buy milk', id: 'oF123', note: '', completed: false },
     ]);
   });
 
   it('parses single task with note', () => {
     expect(parseTaskOutput('Buy milk\x1foF123\x1fGet 2%')).toEqual([
-      { name: 'Buy milk', id: 'oF123', note: 'Get 2%' },
+      { name: 'Buy milk', id: 'oF123', note: 'Get 2%', completed: false },
     ]);
   });
 
   it('restores newlines in note', () => {
     expect(
       parseTaskOutput('Task\x1foF1\x1fLine one\\nLine two'),
-    ).toEqual([{ name: 'Task', id: 'oF1', note: 'Line one\nLine two' }]);
+    ).toEqual([
+      { name: 'Task', id: 'oF1', note: 'Line one\nLine two', completed: false },
+    ]);
   });
 
   it('parses multiple tasks', () => {
     const output = 'Task A\x1fid1\x1fNote A\nTask B\x1fid2\x1fNote B';
     expect(parseTaskOutput(output)).toEqual([
-      { name: 'Task A', id: 'id1', note: 'Note A' },
-      { name: 'Task B', id: 'id2', note: 'Note B' },
+      { name: 'Task A', id: 'id1', note: 'Note A', completed: false },
+      { name: 'Task B', id: 'id2', note: 'Note B', completed: false },
+    ]);
+  });
+
+  it('parses 4-field format with completed true', () => {
+    expect(parseTaskOutput('Done\x1fid1\x1f\x1ftrue')).toEqual([
+      { name: 'Done', id: 'id1', note: '', completed: true },
+    ]);
+  });
+
+  it('parses 4-field format with completed false', () => {
+    expect(parseTaskOutput('Todo\x1fid2\x1fNote\x1ffalse')).toEqual([
+      { name: 'Todo', id: 'id2', note: 'Note', completed: false },
     ]);
   });
 });
