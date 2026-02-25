@@ -38,6 +38,59 @@
   white-space: pre-line;
 }
 
+.omnifocus-task-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.omnifocus-task-link {
+  font-size: 0.9em;
+  opacity: 0.7;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.omnifocus-task-link:hover {
+  opacity: 1;
+}
+
+.omnifocus-task-note-details {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.omnifocus-task-note-summary {
+  cursor: pointer;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  user-select: none;
+  list-style: none;
+}
+
+.omnifocus-task-note-summary::-webkit-details-marker {
+  display: none;
+}
+
+.omnifocus-task-note-summary::before {
+  content: '▸ ';
+  margin-right: 4px;
+}
+
+.omnifocus-task-note-details[open] .omnifocus-task-note-summary::before {
+  content: '▾ ';
+}
+
+.omnifocus-task-note {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: pre-line;
+  margin-top: 4px;
+  padding-left: 4px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
 .omnifocus-empty {
   color: var(--text-muted);
   font-style: italic;

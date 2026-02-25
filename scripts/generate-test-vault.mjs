@@ -150,6 +150,24 @@ project: Team
 project: xyznonexistent
 \`\`\`
 
+## Tag (exact)
+
+\`\`\`omnifocus
+tag: @Work
+\`\`\`
+
+## Tag (substring)
+
+\`\`\`omnifocus
+tag: Work
+\`\`\`
+
+## Tag (no match)
+
+\`\`\`omnifocus
+tag: xyznonexistent
+\`\`\`
+
 ## Empty source (usage hint)
 
 \`\`\`omnifocus

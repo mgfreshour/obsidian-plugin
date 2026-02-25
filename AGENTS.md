@@ -2,10 +2,9 @@
 
 ## Project Overview
 
-This is a **starter template** for an Obsidian community plugin. It contains a fully
-configured build toolchain, test framework, and linting setup, but the plugin itself has
-no functionality yet — `main.ts` is a skeleton with TODO placeholders. Everything is
-ready for feature development.
+An Obsidian community plugin that integrates with OmniFocus 4 on macOS. It fetches
+tasks from OmniFocus via AppleScript and displays them inline in markdown code blocks.
+Supports inbox, project, and tag sources with fuzzy substring matching.
 
 - **Plugin ID**: `obsidian-plugin` (set in `manifest.json`)
 - **Version**: 0.1.0
@@ -19,7 +18,11 @@ ready for feature development.
 ```
 obsidian-plugin/
 ├── main.ts                         # Plugin entry point (extends Plugin class)
-├── styles.css                      # Plugin stylesheet (empty)
+├── src/
+│   ├── omnifocus.ts                # OmniFocus AppleScript integration
+│   ├── omnifocus.test.ts           # Unit tests for omnifocus.ts
+│   └── settings.ts                 # Plugin settings interface & UI tab
+├── styles.css                      # Plugin stylesheet
 ├── manifest.json                   # Obsidian plugin manifest (id, version, etc.)
 ├── versions.json                   # Release version tracking (empty)
 ├── package.json                    # npm config, scripts, devDependencies
@@ -32,32 +35,38 @@ obsidian-plugin/
 ├── CLAUDE.md                       # AI assistant instructions & codebase context
 ├── AGENTS.md                       # Symlink → CLAUDE.md
 ├── README.md                       # Project readme
+├── docs/
+│   └── omnifocus-applescript.md    # OmniFocus AppleScript + Node.js reference
 └── scripts/
-    └── generate-test-vault.mjs     # Creates a test Obsidian vault with plugin installed
+    ├── generate-test-vault.mjs     # Creates a test Obsidian vault with plugin installed
+    └── test-omnifocus.ts           # CLI integration test for OmniFocus functions
 ```
 
-**Planned directories** (not yet created):
-- `src/` — feature modules organized by concern
-- `__tests__/` — unit tests (or co-located `*.test.ts` / `*.spec.ts` files)
+## OmniFocus Integration (`src/omnifocus.ts`)
+
+Communicates with OmniFocus 4 via `osascript` (AppleScript). See
+[docs/omnifocus-applescript.md](docs/omnifocus-applescript.md) for the full
+AppleScript reference, gotchas, and performance notes.
+
+Key exports:
+- **`TaskSource`** — discriminated union: `inbox`, `project: <name>`, `tag: <name>`
+- **`parseSource(input)`** — parses code-block body into a `TaskSource`
+- **`resolveName(query, candidates, entityLabel)`** — fuzzy substring matching
+  with exact → single substring → ambiguous → no match error flow
+- **`fetchTasks(source)`** — resolves name, builds AppleScript, runs osascript
+- **`fetchProjectNames()` / `fetchTagNames()`** — list all projects/tags
+- **`sourceLabel(source)`** — human-readable label for display
 
 ## Entry Point: main.ts
 
-The sole source file. Exports a default class extending `Plugin`:
-
-```typescript
-import { Plugin } from 'obsidian';
-
-export default class ObsidianPlugin extends Plugin {
-  async onload() {
-    // TODO: Load settings
-    // TODO: Add commands
-    // TODO: Add UI elements
-  }
-  onunload() {
-    // cleanup
-  }
-}
-```
+Exports a default class extending `Plugin`. Key functionality:
+- **Settings** — sync interval, persisted via `loadData`/`saveData`
+- **Command palette** — "Fetch OmniFocus Inbox" command
+- **Ribbon icon** — "Sync OmniFocus Inbox" button
+- **Auto-sync interval** — configurable periodic inbox sync
+- **Code block processor** — `omnifocus` fenced code blocks render inline task
+  lists with sync buttons. Parses source, fetches tasks, displays errors.
+- **`syncInbox()`** — fetches inbox and writes to a markdown file
 
 Key Obsidian lifecycle hooks:
 - **`onload()`** — called when the plugin is enabled. Register commands, views,
@@ -92,6 +101,7 @@ Key Obsidian lifecycle hooks:
 | `npm run lint`      | `eslint . --ext .ts`                          | Lint TypeScript files            |
 | `npm run lint:fix`  | `eslint . --ext .ts --fix`                    | Auto-fix lint issues             |
 | `npm run generate-vault` | `node scripts/generate-test-vault.mjs`   | Create test vault for manual QA  |
+| `npm run launch`  | `npm run build && npm run generate-vault && node scripts/launch-obsidian.mjs` | Build, generate vault, open Obsidian |
 
 ## Testing
 
@@ -99,7 +109,8 @@ Key Obsidian lifecycle hooks:
 - **Test patterns**: `__tests__/**/*.ts` and `**/*.{spec,test}.ts`
 - **Environment**: Node
 - **Coverage**: collected from all `.ts` files (excluding `.d.ts`)
-- **No tests exist yet** — infrastructure is ready
+- Tests co-located with source: `src/omnifocus.test.ts`
+- CLI integration test: `npx tsx scripts/test-omnifocus.ts`
 
 ## Linting
 
@@ -116,7 +127,7 @@ Creates a `test-vault/` directory that can be opened in Obsidian for manual test
 - Reads plugin name from `package.json` (overridable via CLI arg)
 - Creates `.obsidian/` config structure with the plugin registered
 - Copies `manifest.json` and `main.js` into the vault's plugins directory
-- Generates sample markdown files (Welcome.md, Sample Note.md)
+- Generates sample markdown files (Welcome.md, OmniFocus Tests.md)
 - Requires `npm run build` first so `main.js` exists
 
 ## Key Obsidian APIs (for future development)
@@ -248,3 +259,4 @@ this.addCommand({
 - [Obsidian Plugin API Documentation](https://docs.obsidian.md/Plugins)
 - [Obsidian Plugin Development Guide](https://docs.obsidian.md/Plugins/Getting+started)
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html)
+- [OmniFocus AppleScript + Node.js Reference](docs/omnifocus-applescript.md) — gotchas, working queries, performance notes

@@ -2,7 +2,7 @@ import { Notice, Plugin, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, SettingsTab } from './src/settings';
 import type { PluginSettings } from './src/settings';
 import { fetchTasks, parseSource, sourceLabel } from './src/omnifocus';
-import type { TaskSource } from './src/omnifocus';
+import type { OmniFocusTask, TaskSource } from './src/omnifocus';
 
 const INBOX_FILE = 'Sample Note.md';
 
@@ -52,6 +52,7 @@ export default class ObsidianPlugin extends Plugin {
         const list = usage.createEl('ul');
         list.createEl('li', { text: 'inbox' });
         list.createEl('li', { text: 'project: <name>' });
+        list.createEl('li', { text: 'tag: <name>' });
         return;
       }
 
@@ -62,19 +63,43 @@ export default class ObsidianPlugin extends Plugin {
         cls: 'omnifocus-sync-btn',
       });
 
-      const listEl = container.createEl('ul', { cls: 'omnifocus-task-list' });
+      const listWrapper = container.createDiv({ cls: 'omnifocus-list-wrapper' });
+      let listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
 
-      const renderTasks = (tasks: string[]) => {
-        listEl.empty();
+      const renderTasks = (tasks: OmniFocusTask[]) => {
+        listWrapper.empty();
+        listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
         if (tasks.length === 0) {
-          const empty = container.createEl('p', {
+          const empty = listWrapper.createEl('p', {
             text: `No tasks in ${label}.`,
             cls: 'omnifocus-empty',
           });
           listEl.replaceWith(empty);
         } else {
           for (const task of tasks) {
-            listEl.createEl('li', { text: task });
+            const li = listEl.createEl('li', { cls: 'omnifocus-task-item' });
+            li.createSpan({ text: task.name });
+            const link = li.createEl('a', {
+              href: `omnifocus:///task/${task.id}`,
+              cls: 'omnifocus-task-link',
+              title: 'Open in OmniFocus',
+            });
+            link.setText('↗');
+            link.addEventListener('click', (e) => {
+              e.preventDefault();
+              require('electron').shell.openExternal(`omnifocus:///task/${task.id}`);
+            });
+            if (task.note) {
+              const details = li.createEl('details', {
+                cls: 'omnifocus-task-note-details',
+              });
+              details.createEl('summary', {
+                cls: 'omnifocus-task-note-summary',
+                text: 'Note',
+              });
+              const noteEl = details.createDiv({ cls: 'omnifocus-task-note' });
+              noteEl.setText(task.note);
+            }
           }
         }
       };
@@ -86,9 +111,10 @@ export default class ObsidianPlugin extends Plugin {
           const tasks = await fetchTasks(taskSource);
           renderTasks(tasks);
         } catch (err) {
-          listEl.empty();
           const message = err instanceof Error ? err.message : String(err);
-          listEl.createEl('li', { text: `Error: ${message}` });
+          listWrapper.empty();
+          listEl = listWrapper.createEl('ul', { cls: 'omnifocus-task-list' });
+          listEl.createEl('li', { text: `Error: ${message}`, cls: 'omnifocus-error' });
         } finally {
           btn.disabled = false;
           btn.setText(`Sync OmniFocus ${label}`);
@@ -116,7 +142,13 @@ export default class ObsidianPlugin extends Plugin {
         lines.push('*No tasks in inbox.*');
       } else {
         for (const task of tasks) {
-          lines.push(`- ${task}`);
+          lines.push(`- [${task.name}](omnifocus:///task/${task.id}) ↗`);
+          if (task.note) {
+            const noteLines = task.note.split('\n');
+            for (const nl of noteLines) {
+              lines.push(`  ${nl}`);
+            }
+          }
         }
       }
       const content = lines.join('\n') + '\n';
